@@ -53,6 +53,11 @@ class DataScan : public MDSUtility
     int recover();
 
     /**
+     * Scan data pool for file sizes and mtimes
+     */
+    int recover_extents();
+
+    /**
      * Create a .inode object, i.e. root or mydir
      */
     int inject_unlinked_inode(inodeno_t inono, int mode);

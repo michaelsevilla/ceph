@@ -27,8 +27,9 @@
 void DataScan::usage()
 {
   std::cout << "Usage: \n"
-    << "  cephfs-data-scan scan <data pool name>\n"
     << "  cephfs-data-scan init\n"
+    << "  cephfs-data-scan scan_extents <data pool name>\n"
+    << "  cephfs-data-scan scan_inodes <data pool name>\n"
     << std::endl;
 
   generic_client_usage();
@@ -55,7 +56,7 @@ int DataScan::main(const std::vector<const char*> &args)
   dout(4) << "connecting to RADOS..." << dendl;
   rados.connect();
 
-#if 0
+#if 1
   // TODO parse args
   n = 0;
   m = 1;
@@ -82,7 +83,7 @@ int DataScan::main(const std::vector<const char*> &args)
   }
 
   std::string const &command = args[0];
-  if (command == "scan") {
+  if (command == "scan_inodes" || command == "scan_extents") {
     if (args.size() < 2) {
       usage();
       return -EINVAL;
@@ -109,7 +110,12 @@ int DataScan::main(const std::vector<const char*> &args)
         return r;
       }
     }
-    return recover();
+    if (command == "scan_inodes") {
+      return recover();
+    } else if (command == "scan_extents") {
+      return recover_extents();
+    }
+
   } else if (command == "init") {
     return init_metadata();
   } else {
@@ -236,6 +242,91 @@ int DataScan::check_roots(bool *result)
  *   used for accumulating.
  */
 
+
+int DataScan::recover_extents()
+{
+  float progress = 0.0;
+  librados::NObjectIterator i = data_io.nobjects_begin(n, m);
+  librados::NObjectIterator i_end = data_io.nobjects_end();
+  int r = 0;
+
+  for (; i != i_end; ++i) {
+    const std::string oid = i->get_oid();
+    if (i.get_progress() != progress) {
+      if (int(i.get_progress() * 100) / 5 != int(progress * 100) / 5) {
+        std::cerr << percentify(i.get_progress()) << "%" << std::endl;
+      }
+      progress = i.get_progress();
+    }
+
+    // Read size
+    uint64_t size;
+    time_t mtime;
+    // FIXME: by using librados, I throw away precision because it wants
+    // to make me use time_t instead of utime_t :-(
+    r = data_io.stat(oid, &size, &mtime);
+    if (r != 0) {
+      dout(4) << "Cannot stat '" << oid << "': skipping" << dendl;
+      continue;
+    }
+
+    // TODO
+    // I need to keep track of:
+    //  * The highest object ID seen
+    //  * The size of the highest object ID seen
+    //  * The largest object seen
+    //
+    //  Given those things, I can later infer the object chunking
+    //  size, the offset of the last object (chunk size * highest ID seen)
+    //  and the actual size (offset of last object + size of highest ID seen)
+    //
+    //  This logic doesn't take account of striping.
+
+    // XXX for the moment: be much simpler and just assume 4MB chunks
+    
+    // TODO: handle errors object names not of form [a-f0-0]+\.[a-f0-9]+
+    
+    std::string err;
+    std::string inode_str = oid.substr(0, oid.find("."));
+    uint64_t inode_no = strict_strtoll(inode_str.c_str(), 16, &err);
+    if (!err.empty()) {
+      dout(4) << "Bad inode number '" << inode_str << "', skipping" << dendl;
+      continue;
+    }
+
+    // 0th object name
+    object_t zeroth_object = InodeStore::get_object_name(inode_no, frag_t(), "");
+
+    std::string pos_string = oid.substr(oid.find(".") + 1);
+    uint64_t obj = strict_strtoll(pos_string.c_str(), 16, &err);
+    if (!err.empty()) {
+      dout(4) << "Bad object offset '" << pos_string << "', skipping" << dendl;
+      continue;
+    }
+
+    uint64_t chunk_size = 4 * 1024 * 1024;
+    int64_t upper_size = obj * chunk_size + size;
+
+    // Construct a librados operation invoking our class method
+    librados::ObjectReadOperation op;
+    bufferlist inbl;
+    ::encode(std::string("scan_size"), inbl);
+    ::encode(upper_size, inbl);
+    op.exec("cephfs", "set_if_greater", inbl);
+
+    bufferlist outbl;
+    int r = data_io.operate(zeroth_object.name, &op, &outbl);
+    if (r < 0) {
+      derr << "Failed to store size data from '"
+        << oid << "' to '" << zeroth_object.name << "': "
+        << cpp_strerror(r) << dendl;
+      continue;
+    }
+  }
+
+  return 0;
+}
+
 /*
  * Other handy commands:
  *  A Find inode by backtrace expression, e.g. "myimportantfile"
@@ -297,14 +388,30 @@ int DataScan::recover()
     // TODO: if backtrace is missing or corrupt, put it in lost+found
 
     // Read size
-    uint64_t size;
+    uint64_t obj_size;
     time_t mtime;
     // FIXME: by using librados, I throw away precision because it wants
     // to make me use time_t instead of utime_t :-(
-    r = data_io.stat(oid, &size, &mtime);
+    r = data_io.stat(oid, &obj_size, &mtime);
     if (r != 0) {
       dout(4) << "Cannot stat '" << oid << "': skipping" << dendl;
       continue;
+    }
+
+    // Read accumulated size from scan_extents phase
+    uint64_t file_size = 0;
+    bufferlist scan_size_bl;
+    r = data_io.getxattr(oid, "scan_size", scan_size_bl);
+    if (r >= 0) {
+      try {
+        bufferlist::iterator scan_size_bl_iter = scan_size_bl.begin();
+        ::decode(file_size, scan_size_bl_iter);
+      } catch (const buffer::error &err) {
+        dout(4) << "Invalid size attr on '" << oid << "'" << dendl;
+        file_size = obj_size;
+      }
+    } else {
+      file_size = obj_size;
     }
 
     // TODO: validate backtrace ino number against object name
@@ -444,10 +551,9 @@ int DataScan::recover()
           dentry.inode.mode = 0500 | S_IFREG;
           dout(10) << "Linking inode 0x" << std::hex << ino
             << " at 0x" << parent_ino << "/" << dname << std::dec
-            << " with size=" << size << " bytes" << dendl;
-          // TODO: get size for multi-object-sized files!
-          dentry.inode.size = size;
-          dentry.inode.max_size_ever = size;
+            << " with size=" << file_size << " bytes" << dendl;
+          dentry.inode.size = file_size;
+          dentry.inode.max_size_ever = file_size;
 
           // TODO: get mtime for multi-object files!
           dentry.inode.mtime.tv.tv_sec = mtime;
