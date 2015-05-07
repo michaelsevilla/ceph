@@ -1,24 +1,21 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
-
 /*
- * This is a simple example RADOS class, designed to be usable as a
- * template from implementing new methods.
+ * Ceph - scalable distributed file system
  *
- * Our goal here is to illustrate the interface between the OSD and
- * the class and demonstrate what kinds of things a class can do.
+ * Copyright (C) 2015 Red Hat
  *
- * Note that any *real* class will probably have a much more
- * sophisticated protocol dealing with the in and out data buffers.
- * For an example of the model that we've settled on for handling that
- * in a clean way, please refer to cls_lock or cls_version for
- * relatively simple examples of how the parameter encoding can be
- * encoded in a way that allows for forward and backward compatibility
- * between client vs class revisions.
+ * This is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License version 2.1, as published by the Free Software
+ * Foundation.  See file COPYING.
+ *
  */
+
 
 #include <string>
 #include <errno.h>
+#include <sstream>
 
 #include "objclass/objclass.h"
 
@@ -27,6 +24,7 @@ CLS_NAME(cephfs_size_scan)
 
 cls_handle_t h_class;
 cls_method_handle_t h_set_if_greater;
+cls_method_handle_t h_accumulate_inode_metadata;
 
 /**
  * Set a named xattr to a given integer, if and only if the xattr
@@ -106,6 +104,169 @@ static int set_if_greater(cls_method_context_t hctx, bufferlist *in, bufferlist 
 }
 
 /**
+ * Value class for the xattr we'll use to accumulating
+ * the highest object seen for a given inode
+ */
+class ObjCeiling {
+  public:
+    uint64_t id;
+    uint64_t size;
+
+    ObjCeiling()
+      : id(0), size(0)
+    {}
+
+    ObjCeiling(uint64_t id_, uint64_t size_)
+      : id(id_), size(size_)
+    {}
+
+    bool operator >(ObjCeiling const &rhs) const
+    {
+      return id > rhs.id;
+    }
+
+    void encode(bufferlist &bl) const
+    {
+      ::encode(id, bl);
+      ::encode(size, bl);
+    }
+
+    void decode(bufferlist::iterator &p)
+    {
+      ::decode(id, p);
+      ::decode(size, p);
+    }
+};
+WRITE_CLASS_ENCODER(ObjCeiling)
+
+std::ostream &operator<<(std::ostream &out, ObjCeiling &in)
+{
+  out << "id: " << in.id << " size: " << in.size;
+  return out;
+}
+
+
+/**
+ * Helper for setting an xattr iff the input value compares as
+ * greater than an existing value decoded from the xattr.
+ */
+template <typename A>
+static int set_if_greater(cls_method_context_t hctx, const std::string &xattr_name, const A input_val)
+{
+  bufferlist existing_val_bl;
+
+  bool set_val = false;
+  int r = cls_cxx_getxattr(hctx, xattr_name.c_str(), &existing_val_bl);
+  if (r == -ENOENT || existing_val_bl.length() == 0) {
+    set_val = true;
+  } else if (r == 0) {
+    bufferlist::iterator existing_p = existing_val_bl.begin();
+    try {
+      A existing_val;
+      ::decode(existing_val, existing_p);
+      if (!existing_p.end()) {
+        // Trailing junk?  Consider it invalid and overwrite
+        set_val = true;
+      } else {
+        // Valid existing value, do comparison
+        set_val = input_val > existing_val;
+      }
+    } catch (const buffer::error &err) {
+      // Corrupt or empty existing value, overwrite it
+      set_val = true;
+    }
+  } else {
+    return r;
+  }
+
+  // Conditionally set the new xattr
+  if (set_val) {
+    bufferlist set_bl;
+    ::encode(input_val, set_bl);
+    return cls_cxx_setxattr(hctx, xattr_name.c_str(), &set_bl);
+  } else {
+    return 0;
+  }
+}
+
+static int set_if_greater(cls_method_context_t hctx, const std::string &xattr_name, const ObjCeiling input_val)
+{
+  bufferlist existing_val_bl;
+
+  bool set_val = false;
+  int r = cls_cxx_getxattr(hctx, xattr_name.c_str(), &existing_val_bl);
+  if (r == -ENOENT || existing_val_bl.length() == 0) {
+    set_val = true;
+  } else if (r >= 0) {
+    bufferlist::iterator existing_p = existing_val_bl.begin();
+    try {
+      ObjCeiling existing_val;
+      ::decode(existing_val, existing_p);
+      if (!existing_p.end()) {
+        // Trailing junk?  Consider it invalid and overwrite
+        set_val = true;
+      } else {
+        // Valid existing value, do comparison
+        set_val = input_val > existing_val;
+      }
+    } catch (const buffer::error &err) {
+      // Corrupt or empty existing value, overwrite it
+      set_val = true;
+    }
+  } else {
+    return r;
+  }
+
+  // Conditionally set the new xattr
+  if (set_val) {
+    bufferlist set_bl;
+    ::encode(input_val, set_bl);
+    return cls_cxx_setxattr(hctx, xattr_name.c_str(), &set_bl);
+  } else {
+    return 0;
+  }
+}
+
+static int accumulate_inode_metadata(cls_method_context_t hctx,
+    bufferlist *in, bufferlist *out)
+{
+  assert(in != NULL);
+  assert(out != NULL);
+
+  std::string obj_xattr_name;
+  std::string mtime_xattr_name;
+  uint64_t input_obj_id = 0;
+  uint64_t input_obj_size = 0;
+  time_t input_mtime = 0;
+  int r = 0;
+
+  // Decode `in`
+  bufferlist::iterator q = in->begin();
+  try {
+    ::decode(obj_xattr_name, q);
+    ::decode(mtime_xattr_name, q);
+    ::decode(input_obj_id, q);
+    ::decode(input_obj_size, q);
+    ::decode(input_mtime, q);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  ObjCeiling ceiling(input_obj_id, input_obj_size);
+  r = set_if_greater(hctx, obj_xattr_name, ceiling);
+  if (r < 0) {
+    return r;
+  }
+
+  r = set_if_greater(hctx, mtime_xattr_name, input_mtime);
+  if (r < 0) {
+    return r;
+  }
+
+  return 0;
+}
+
+/**
  * initialize class
  *
  * We do two things here: we register the new class, and then register
@@ -118,6 +279,9 @@ void __cls_init()
   CLS_LOG(0, "loading cephfs_size_scan");
 
   cls_register("cephfs", &h_class);
+  cls_register_cxx_method(h_class, "accumulate_inode_metadata",
+			  CLS_METHOD_WR | CLS_METHOD_RD,
+			  accumulate_inode_metadata, &h_accumulate_inode_metadata);
   cls_register_cxx_method(h_class, "set_if_greater",
 			  CLS_METHOD_WR | CLS_METHOD_RD,
 			  set_if_greater, &h_set_if_greater);
