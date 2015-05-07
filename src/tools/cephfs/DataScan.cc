@@ -144,6 +144,11 @@ int DataScan::inject_unlinked_inode(inodeno_t inono, int mode)
     inode.inode.mtime = ceph_clock_now(g_ceph_context);
   inode.inode.nlink = 1;
   inode.inode.truncate_size = -1ull;
+  inode.inode.truncate_seq = 1;
+
+  // Force layout to default: should we let users override this so that
+  // they don't have to mount the filesystem to correct it?
+  inode.inode.layout = g_default_file_layout;
 
   // Serialize
   bufferlist inode_bl;
@@ -559,6 +564,9 @@ int DataScan::recover()
           dentry.inode.mtime.tv.tv_sec = mtime;
           dentry.inode.atime.tv.tv_sec = mtime;
           dentry.inode.ctime.tv.tv_sec = mtime;
+          dentry.inode.layout = g_default_file_layout;
+          dentry.inode.truncate_seq = 1;
+          dentry.inode.truncate_size = -1ull;
         } else {
           // This is the linkage for a directory
           dentry.inode.mode = 0755 | S_IFDIR;
@@ -568,6 +576,7 @@ int DataScan::recover()
           // accurate, but it should avoid functional issues.
           dentry.inode.dirstat.nfiles = 1;
           dentry.inode.size = 1;
+
         }
         dentry.inode.nlink = 1;
         dentry.inode.ino = ino;
