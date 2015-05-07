@@ -248,6 +248,28 @@ int DataScan::check_roots(bool *result)
  */
 
 
+int parse_oid(const std::string &oid, uint64_t *inode_no, uint64_t *obj_id)
+{
+  if (oid.find(".") == std::string::npos || oid.find(".") == oid.size() - 1) {
+    return -EINVAL;
+  }
+
+  std::string err;
+  std::string inode_str = oid.substr(0, oid.find("."));
+  *inode_no = strict_strtoll(inode_str.c_str(), 16, &err);
+  if (!err.empty()) {
+    return -EINVAL;
+  }
+
+  std::string pos_string = oid.substr(oid.find(".") + 1);
+  *obj_id = strict_strtoll(pos_string.c_str(), 16, &err);
+  if (!err.empty()) {
+    return -EINVAL;
+  }
+
+  return 0;
+}
+
 int DataScan::recover_extents()
 {
   float progress = 0.0;
@@ -275,8 +297,7 @@ int DataScan::recover_extents()
       continue;
     }
 
-    // TODO
-    // I need to keep track of:
+    // I need to keep track of
     //  * The highest object ID seen
     //  * The size of the highest object ID seen
     //  * The largest object seen
@@ -286,38 +307,27 @@ int DataScan::recover_extents()
     //  and the actual size (offset of last object + size of highest ID seen)
     //
     //  This logic doesn't take account of striping.
-
-    // XXX for the moment: be much simpler and just assume 4MB chunks
-    
-    // TODO: handle errors object names not of form [a-f0-0]+\.[a-f0-9]+
-    
-    std::string err;
-    std::string inode_str = oid.substr(0, oid.find("."));
-    uint64_t inode_no = strict_strtoll(inode_str.c_str(), 16, &err);
-    if (!err.empty()) {
-      dout(4) << "Bad inode number '" << inode_str << "', skipping" << dendl;
+    uint64_t inode_no = 0;
+    uint64_t obj_id = 0;
+    r = parse_oid(oid, &inode_no, &obj_id);
+    if (r != 0) {
+      dout(4) << "Bad object name '" << oid << "' skipping" << dendl;
       continue;
     }
 
-    // 0th object name
+    // Generate 0th object name, where we will accumulate sizes/mtimes
     object_t zeroth_object = InodeStore::get_object_name(inode_no, frag_t(), "");
-
-    std::string pos_string = oid.substr(oid.find(".") + 1);
-    uint64_t obj = strict_strtoll(pos_string.c_str(), 16, &err);
-    if (!err.empty()) {
-      dout(4) << "Bad object offset '" << pos_string << "', skipping" << dendl;
-      continue;
-    }
-
-    uint64_t chunk_size = 4 * 1024 * 1024;
-    int64_t upper_size = obj * chunk_size + size;
 
     // Construct a librados operation invoking our class method
     librados::ObjectReadOperation op;
     bufferlist inbl;
     ::encode(std::string("scan_size"), inbl);
-    ::encode(upper_size, inbl);
-    op.exec("cephfs", "set_if_greater", inbl);
+    ::encode(std::string("scan_mtime"), inbl);
+    ::encode(obj_id, inbl);
+    ::encode(size, inbl);
+    ::encode(mtime, inbl);
+
+    op.exec("cephfs", "accumulate_inode_metadata", inbl);
 
     bufferlist outbl;
     int r = data_io.operate(zeroth_object.name, &op, &outbl);
@@ -370,10 +380,25 @@ int DataScan::recover()
       progress = i.get_progress();
     }
 
+    uint64_t obj_name_ino = 0;
+    uint64_t obj_name_offset = 0;
+    r = parse_oid(oid, &obj_name_ino, &obj_name_offset);
+    if (r != 0) {
+      dout(4) << "Bad object name '" << oid << "', skipping" << dendl;
+      continue;
+    }
+
+    // We are only interested in 0th objects during this phase: we touched
+    // the other objects during recover_extents
+    if (obj_name_offset != 0) {
+      continue;
+    }
+
     // Read backtrace
     bufferlist parent_bl;
     int r = data_io.getxattr(oid, "parent", parent_bl);
     if (r == -ENODATA) {
+      // TODO: if backtrace is missing or corrupt, put it in lost+found
       dout(10) << "No backtrace on '" << oid << "'" << dendl;
       continue;
     } else if (r < 0) {
@@ -390,14 +415,19 @@ int DataScan::recover()
       dout(4) << "Corrupt backtrace on '" << oid << "': " << e << dendl;
       continue;
     }
-    // TODO: if backtrace is missing or corrupt, put it in lost+found
+
+    // Santity checking backtrace ino against object name
+    if (backtrace.ino != obj_name_ino) {
+      dout(4) << "Backtrace ino 0x" << std::hex << backtrace.ino
+        << " doesn't match object name ino 0x" << obj_name_ino
+        << std::dec << dendl;
+      continue;
+    }
 
     // Read size
-    uint64_t obj_size;
-    time_t mtime;
-    // FIXME: by using librados, I throw away precision because it wants
-    // to make me use time_t instead of utime_t :-(
-    r = data_io.stat(oid, &obj_size, &mtime);
+    uint64_t obj_size = 0;
+    time_t obj_mtime = 0;
+    r = data_io.stat(oid, &obj_size, &obj_mtime);
     if (r != 0) {
       dout(4) << "Cannot stat '" << oid << "': skipping" << dendl;
       continue;
@@ -410,13 +440,51 @@ int DataScan::recover()
     if (r >= 0) {
       try {
         bufferlist::iterator scan_size_bl_iter = scan_size_bl.begin();
-        ::decode(file_size, scan_size_bl_iter);
+        uint64_t max_obj_id;
+        uint64_t max_obj_size;
+        ::decode(max_obj_id, scan_size_bl_iter);
+        ::decode(max_obj_size, scan_size_bl_iter);
+
+        if (max_obj_id > 0) {
+          // If there are more objects, and this object is a power of two
+          // that is greater than the size of the last object, then make
+          // an educated guess that this object's size is probably the chunk
+          // size.
+        
+          // TODO: provide a means for the user to specify the layout, as
+          // for e.g. striped layouts there is no way we can infer it.
+          uint32_t chunk_size = 0;
+          if ((obj_size & (obj_size - 1)) == 0 && obj_size >= max_obj_size) {
+            chunk_size = obj_size;
+          } else {
+            chunk_size = g_default_file_layout.fl_object_size;
+          }
+          file_size = chunk_size * max_obj_id + max_obj_size;
+        } else {
+          file_size = obj_size;
+        }
       } catch (const buffer::error &err) {
         dout(4) << "Invalid size attr on '" << oid << "'" << dendl;
         file_size = obj_size;
       }
     } else {
       file_size = obj_size;
+    }
+
+    // Read accumulated mtime from scan_extents phase
+    time_t file_mtime = 0;
+    bufferlist scan_mtime_bl;
+    r = data_io.getxattr(oid, "scan_mtime", scan_mtime_bl);
+    if (r >= 0) {
+      try {
+        bufferlist::iterator scan_mtime_bl_iter = scan_mtime_bl.begin();
+        ::decode(file_mtime, scan_mtime_bl_iter);
+      } catch (const buffer::error &err) {
+        dout(4) << "Invalid mtime attr on '" << oid << "'" << dendl;
+        file_mtime = obj_mtime;
+      }
+    } else {
+      file_mtime = obj_mtime;
     }
 
     // TODO: validate backtrace ino number against object name
@@ -557,16 +625,20 @@ int DataScan::recover()
           dout(10) << "Linking inode 0x" << std::hex << ino
             << " at 0x" << parent_ino << "/" << dname << std::dec
             << " with size=" << file_size << " bytes" << dendl;
+
+          // The file size and mtime we learned by scanning globally
           dentry.inode.size = file_size;
           dentry.inode.max_size_ever = file_size;
+          dentry.inode.mtime.tv.tv_sec = file_mtime;
+          dentry.inode.atime.tv.tv_sec = file_mtime;
+          dentry.inode.ctime.tv.tv_sec = file_mtime;
 
-          // TODO: get mtime for multi-object files!
-          dentry.inode.mtime.tv.tv_sec = mtime;
-          dentry.inode.atime.tv.tv_sec = mtime;
-          dentry.inode.ctime.tv.tv_sec = mtime;
           dentry.inode.layout = g_default_file_layout;
+
           dentry.inode.truncate_seq = 1;
           dentry.inode.truncate_size = -1ull;
+
+          dentry.inode.inline_data.version = CEPH_INLINE_NONE;
         } else {
           // This is the linkage for a directory
           dentry.inode.mode = 0755 | S_IFDIR;
