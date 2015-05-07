@@ -90,7 +90,7 @@ int DataScan::main(const std::vector<const char*> &args)
     }
     const std::string data_pool_name = args[1];
     {
-      int64_t data_pool_id = rados.pool_lookup(data_pool_name.c_str());
+      data_pool_id = rados.pool_lookup(data_pool_name.c_str());
       if (data_pool_id < 0) {
         std::cerr << "Data pool '" << data_pool_name << "' not found!" << std::endl;
         return -ENOENT;
@@ -149,6 +149,7 @@ int DataScan::inject_unlinked_inode(inodeno_t inono, int mode)
   // Force layout to default: should we let users override this so that
   // they don't have to mount the filesystem to correct it?
   inode.inode.layout = g_default_file_layout;
+  inode.inode.layout.fl_pg_pool = mdsmap->get_first_data_pool();
 
   // Serialize
   bufferlist inode_bl;
@@ -435,6 +436,7 @@ int DataScan::recover()
 
     // Read accumulated size from scan_extents phase
     uint64_t file_size = 0;
+    uint32_t chunk_size = g_default_file_layout.fl_object_size;
     bufferlist scan_size_bl;
     r = data_io.getxattr(oid, "scan_size", scan_size_bl);
     if (r >= 0) {
@@ -634,6 +636,9 @@ int DataScan::recover()
           dentry.inode.ctime.tv.tv_sec = file_mtime;
 
           dentry.inode.layout = g_default_file_layout;
+          dentry.inode.layout.fl_object_size = chunk_size;
+          dentry.inode.layout.fl_stripe_unit = chunk_size;
+          dentry.inode.layout.fl_pg_pool = data_pool_id;
 
           dentry.inode.truncate_seq = 1;
           dentry.inode.truncate_size = -1ull;
@@ -733,6 +738,8 @@ int DataScan::recover()
    *  * Missing 0000th objects (i.e. only trailing data objects)
    *  * A dentry that points to B, while a backtrace for A claims that it
    *    belongs in the same dentry name.
+   *  * A sparse file, e.g. only objects 0, 2 exist
+   *  * A missing 0th file, but other objects present
    */
 
   return 0;

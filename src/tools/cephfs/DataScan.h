@@ -25,6 +25,8 @@ class DataScan : public MDSUtility
     librados::IoCtx metadata_io;
     // IoCtx for data pool (where we scrap backtraces from)
     librados::IoCtx data_io;
+    // Remember the data pool ID for use in layouts
+    int64_t data_pool_id;
 
     uint32_t n;
     uint32_t m;
@@ -81,5 +83,9 @@ class DataScan : public MDSUtility
   public:
     void usage();
     int main(const std::vector<const char *> &args);
+
+    DataScan()
+      : data_pool_id(-1), n(0), m(1)
+    {}
 };
 
