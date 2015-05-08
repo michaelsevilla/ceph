@@ -2683,7 +2683,9 @@ void Monitor::handle_command(MMonCommand *m)
     pgmon()->dispatch(m);
     return;
   }
-  if (module == "mon") {
+  if (module == "mon" &&
+      /* 'mon compact' will be handled by the Monitor class */
+      prefix != "mon compact") {
     monmon()->dispatch(m);
     return;
   }
@@ -2728,7 +2730,7 @@ void Monitor::handle_command(MMonCommand *m)
     return;
   }
 
-  if (prefix == "compact") {
+  if (prefix == "compact" || prefix == "mon compact") {
     dout(1) << "triggering manual compaction" << dendl;
     utime_t start = ceph_clock_now(g_ceph_context);
     store->compact();
