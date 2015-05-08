@@ -79,7 +79,28 @@ class DataScan : public MDSUtility
      * Try and read a dentry from a dirfrag
      */
     int read_dentry(inodeno_t parent_ino, frag_t frag,
-                    const std::string &key, InodeStore *inode);
+                    const std::string &dname, InodeStore *inode);
+
+    /**
+     * Inject an inode + dentry parents into the metadata pool,
+     * based on a backtrace recovered from the data pool
+     */
+    int inject_with_backtrace(
+        const inode_backtrace_t &bt, uint64_t size, time_t mtime,
+        uint32_t chunk_size);
+
+    /**
+     * Inject and inode + dentry into the lost+found directory,
+     * when all wel know about a file is its inode.
+     */
+    int inject_lost_and_found(
+        inodeno_t ino, uint64_t size, time_t mtime, uint32_t chunk_size);
+
+    int find_or_create_dirfrag(inodeno_t ino, bool *created);
+
+    int inject_linkage(
+        inodeno_t dir_ino, const std::string &dname, const InodeStore &inode);
+
   public:
     void usage();
     int main(const std::vector<const char *> &args);
