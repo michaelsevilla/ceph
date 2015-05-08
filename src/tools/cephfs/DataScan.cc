@@ -674,13 +674,6 @@ int DataScan::inject_with_backtrace(
     const std::string dname = backptr.dname;
     object_t frag_oid = InodeStore::get_object_name(parent_ino, frag_t(), "");
 
-    // FIXME: in the places we interpret -EINVAL as corrupt, we should
-    // special case the situation where the ::decode has found an
-    // over-high version number, and definitely *avoid* overwriting
-    // it in this case (although it's also possible (indeed likely)
-    // that a corrupt entry might just happen to have high bits in
-    // the version field, so hmmm...)
-
     // Find or create dirfrag
     // ======================
     bool created_dirfrag;
