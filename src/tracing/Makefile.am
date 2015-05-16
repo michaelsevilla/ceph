@@ -20,8 +20,6 @@ nodist_libosd_tp_la_SOURCES = \
 	oprequest.h \
 	osd.c \
 	osd.h \
-        mds.c \
-        mds.h \
 	pg.h \
 	pg.c
 endif
@@ -60,11 +58,25 @@ libos_tp_la_CFLAGS = -I$(top_srcdir)/src $(AM_CFLAGS)
 libos_tp_la_LDFLAGS =
 
 if WITH_LTTNG
+nodist_libmds_tp_la_SOURCES = \
+	mds.c \
+	mds.h
+endif
+libmds_tp_la_LIBADD = -llttng-ust -ldl
+libmds_tp_la_CPPFLAGS = -DTRACEPOINT_PROBE_DYNAMIC_LINKAGE
+libmds_tp_la_CFLAGS = -I$(top_srcdir)/src $(AM_CFLAGS)
+libmds_tp_la_LDFLAGS =
+
+
+
+
+if WITH_LTTNG
 noinst_LTLIBRARIES = \
 	libosd_tp.la \
 	librados_tp.la \
 	librbd_tp.la \
-	libos_tp.la
+	libos_tp.la \
+        libmds_tp.la
 
 BUILT_SOURCES = \
 	librados.h \
@@ -80,4 +92,5 @@ CLEANFILES = \
 	$(nodist_libosd_tp_la_SOURCES) \
 	$(nodist_librados_tp_la_SOURCES) \
 	$(nodist_librbd_tp_la_SOURCES) \
-	$(nodist_libos_tp_la_SOURCES)
+	$(nodist_libos_tp_la_SOURCES) \
+	$(nodist_libmds_tp_la_SOURCES)

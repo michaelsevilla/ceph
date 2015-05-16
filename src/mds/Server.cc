@@ -1282,7 +1282,7 @@ void Server::handle_client_request(MClientRequest *req)
 {
   dout(4) << "handle_client_request " << *req << dendl;
 
-  tracepoint(mds, req_enter, this, req_>get_op());
+  tracepoint(mds, req_enter, this, req->get_op());
   if (mds->logger)
     mds->logger->inc(l_mds_request);
   if (logger)
