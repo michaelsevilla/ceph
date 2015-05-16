@@ -11,6 +11,7 @@ dist_noinst_DATA += \
 	tracing/librbd.tp \
 	tracing/oprequest.tp \
 	tracing/osd.tp \
+	tracing/mds.tp \
 	tracing/pg.tp \
 	tracing/objectstore.tp
 
@@ -18,10 +19,12 @@ if WITH_LTTNG
 libosd_tp_la_SOURCES = \
 	tracing/oprequest.c \
 	tracing/osd.c \
+	tracing/mds.c \
 	tracing/pg.c
 nodist_libosd_tp_la_SOURCES = \
 	tracing/oprequest.h \
 	tracing/osd.h \
+	tracing/mds.h \
 	tracing/pg.h
 endif
 libosd_tp_la_LIBADD = -ldl -llttng-ust
@@ -59,11 +62,26 @@ libos_tp_la_CFLAGS = -I$(top_srcdir)/src/tracing -I$(top_srcdir)/src $(AM_CFLAGS
 libos_tp_la_LDFLAGS = -version-info 1:0:0
 
 if WITH_LTTNG
+nodist_libmds_tp_la_SOURCES = \
+	mds.c \
+	mds.h
+endif
+libmds_tp_la_LIBADD = -llttng-ust -ldl
+libmds_tp_la_CPPFLAGS = -DTRACEPOINT_PROBE_DYNAMIC_LINKAGE
+libmds_tp_la_CFLAGS = -I$(top_srcdir)/src $(AM_CFLAGS)
+libmds_tp_la_LDFLAGS =
+
+
+
+
+if WITH_LTTNG
 lib_LTLIBRARIES += \
 	libosd_tp.la \
 	libos_tp.la \
 	librados_tp.la \
-	librbd_tp.la
+	librbd_tp.la \
+	libos_tp.la \
+        libmds_tp.la
 
 BUILT_SOURCES += \
 	tracing/librados.h \
@@ -71,6 +89,7 @@ BUILT_SOURCES += \
 	tracing/objectstore.h \
 	tracing/oprequest.h \
 	tracing/osd.h \
+	tracing/mds.h \
 	tracing/pg.h
 endif
 

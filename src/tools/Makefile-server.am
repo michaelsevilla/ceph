@@ -43,6 +43,9 @@ cephfs_journal_tool_SOURCES = \
 	tools/cephfs/Resetter.cc \
 	tools/cephfs/MDSUtility.cc
 cephfs_journal_tool_LDADD = $(LIBMDS) $(LIBRADOS) $(CEPH_GLOBAL)
+if WITH_LTTNG
+cephfs_journal_tool_LDADD += $(LIBMDS_TP)
+endif
 bin_PROGRAMS += cephfs-journal-tool
 
 cephfs_table_tool_SOURCES = \
@@ -51,6 +54,9 @@ cephfs_table_tool_SOURCES = \
 	tools/cephfs/RoleSelector.cc \
 	tools/cephfs/MDSUtility.cc
 cephfs_table_tool_LDADD = $(LIBMDS) $(LIBRADOS) $(CEPH_GLOBAL)
+if WITH_LTTNG
+cephfs_table_tool_LDADD += $(LIBMDS_TP)
+endif
 bin_PROGRAMS += cephfs-table-tool
 
 cephfs_data_scan_SOURCES = \

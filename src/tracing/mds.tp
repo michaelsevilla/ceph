@@ -1,0 +1,37 @@
+#include "include/int_types.h"
+
+TRACEPOINT_EVENT(mds, req_received,
+    TP_ARGS(
+        const void *, addr,
+        int32_t, type,
+        uint64_t, tid),
+    TP_FIELDS(
+        ctf_integer_hex(unsigned long, addr, addr)
+        ctf_integer(int32_t, type, type)
+        ctf_integer(uint64_t, tid, tid)
+    )
+)
+
+TRACEPOINT_EVENT(mds, req_replied,
+    TP_ARGS(
+        const void *, addr,
+        int32_t, type,
+        uint64_t, tid),
+    TP_FIELDS(
+        ctf_integer_hex(unsigned long, addr, addr)
+        ctf_integer(int32_t, type, type)
+        ctf_integer(uint64_t, tid, tid)
+    )
+)
+
+TRACEPOINT_EVENT(mds, req_early_replied,
+    TP_ARGS(
+        const void *, addr,
+        int32_t, type,
+        uint64_t, tid),
+    TP_FIELDS(
+        ctf_integer_hex(unsigned long, addr, addr)
+        ctf_integer(int32_t, type, type)
+        ctf_integer(uint64_t, tid, tid)
+    )
+)
