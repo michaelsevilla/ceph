@@ -431,6 +431,8 @@ int Client::init()
 
   client_lock.Unlock();
 
+  cct->_conf->add_observer(this);
+
   AdminSocket* admin_socket = cct->get_admin_socket();
   int ret = admin_socket->register_command("mds_requests",
 					   "mds_requests",
@@ -484,6 +486,8 @@ int Client::init()
 void Client::shutdown() 
 {
   ldout(cct, 1) << "shutdown" << dendl;
+
+  cct->_conf->remove_observer(this);
 
   AdminSocket* admin_socket = cct->get_admin_socket();
   admin_socket->unregister_command("mds_requests");
@@ -543,7 +547,7 @@ void Client::shutdown()
 // ===================
 // metadata cache stuff
 
-void Client::trim_cache()
+void Client::trim_cache(bool trim_kernel_dcache)
 {
   ldout(cct, 20) << "trim_cache size " << lru.lru_get_size() << " max " << lru.lru_get_max() << dendl;
   unsigned last = 0;
@@ -559,6 +563,9 @@ void Client::trim_cache()
     
     trim_dentry(dn);
   }
+
+  if (trim_kernel_dcache && lru.lru_get_size() > lru.lru_get_max())
+    _invalidate_kernel_dcache();
 
   // hose root?
   if (lru.lru_get_size() == 0 && root && root->get_num_ref() == 0 && inode_map.size() == 1 + root_parents.size()) {
@@ -1203,9 +1210,15 @@ Inode* Client::insert_trace(MetaRequest *request, MetaSession *session)
     }
   }
 
-  if (in && (reply->head.op == CEPH_MDS_OP_READDIR ||
-	     reply->head.op == CEPH_MDS_OP_LSSNAP)) {
-    insert_readdir_results(request, session, in);
+  if (in) {
+    if (reply->head.op == CEPH_MDS_OP_READDIR ||
+	reply->head.op == CEPH_MDS_OP_LSSNAP)
+      insert_readdir_results(request, session, in);
+
+    if (request->dentry() == NULL && in != request->inode()) {
+      // pin the target inode if its parent dentry is not pinned
+      request->set_other_inode(in);
+    }
   }
 
   request->target = in;
@@ -2091,37 +2104,78 @@ void Client::handle_client_reply(MClientReply *reply)
     mount_cond.Signal();
 }
 
+void Client::_handle_full_flag(int64_t pool)
+{
+  ldout(cct, 1) << __func__ << ": FULL: cancelling outstanding operations "
+    << "on " << pool << dendl;
+  // Cancel all outstanding ops in this pool with -ENOSPC: it is necessary
+  // to do this rather than blocking, because otherwise when we fill up we
+  // potentially lock caps forever on files with dirty pages, and we need
+  // to be able to release those caps to the MDS so that it can delete files
+  // and free up space.
+  epoch_t cancelled_epoch = objecter->op_cancel_writes(-ENOSPC, pool);
+
+  // For all inodes with layouts in this pool and a pending flush write op
+  // (i.e. one of the ones we will cancel), we've got to purge_set their data
+  // from ObjectCacher so that it doesn't re-issue the write in response to
+  // the ENOSPC error.
+  // Fortunately since we're cancelling everything in a given pool, we don't
+  // need to know which ops belong to which ObjectSet, we can just blow all
+  // the un-flushed cached data away and mark any dirty inodes' async_err
+  // field with -ENOSPC as long as we're sure all the ops we cancelled were
+  // affecting this pool, and all the objectsets we're purging were also
+  // in this pool.
+  for (unordered_map<vinodeno_t,Inode*>::iterator i = inode_map.begin();
+       i != inode_map.end(); ++i)
+  {
+    Inode *inode = i->second;
+    if (inode->oset.dirty_or_tx
+        && (pool == -1 || inode->layout.fl_pg_pool == pool)) {
+      ldout(cct, 4) << __func__ << ": FULL: inode 0x" << std::hex << i->first << std::dec
+        << " has dirty objects, purging and setting ENOSPC" << dendl;
+      objectcacher->purge_set(&inode->oset);
+      inode->async_err = -ENOSPC;
+    }
+  }
+
+  if (cancelled_epoch != (epoch_t)-1) {
+    set_cap_epoch_barrier(cancelled_epoch);
+  }
+}
+
 void Client::handle_osd_map(MOSDMap *m)
 {
   if (objecter->osdmap_full_flag()) {
-    ldout(cct, 1) << __func__ << ": FULL: cancelling outstanding operations" << dendl;
-    // Cancel all outstanding ops with -ENOSPC: it is necessary to do this rather than blocking,
-    // because otherwise when we fill up we potentially lock caps forever on files with
-    // dirty pages, and we need to be able to release those caps to the MDS so that it can
-    // delete files and free up space.
-    epoch_t cancelled_epoch = objecter->op_cancel_writes(-ENOSPC);
+    _handle_full_flag(-1);
+  } else {
+    // Accumulate local list of full pools so that I can drop
+    // the objecter lock before re-entering objecter in
+    // cancel_writes
+    std::vector<int64_t> full_pools;
 
-    // For all inodes with a pending flush write op (i.e. one of the ones we
-    // will cancel), we've got to purge_set their data from ObjectCacher
-    // so that it doesn't re-issue the write in response to the ENOSPC error.
-    // Fortunately since we're cancelling *everything*, we don't need to know
-    // which ops belong to which ObjectSet, we can just blow all the un-flushed
-    // cached data away and mark any dirty inodes' async_err field with -ENOSPC
-    // (i.e. we only need to know which inodes had outstanding ops, not the exact
-    // op-to-inode relation)
-    for (unordered_map<vinodeno_t,Inode*>::iterator i = inode_map.begin();
-         i != inode_map.end(); ++i)
-    {
-      Inode *inode = i->second;
-      if (inode->oset.dirty_or_tx) {
-        ldout(cct, 4) << __func__ << ": FULL: inode 0x" << std::hex << i->first << std::dec
-          << " has dirty objects, purging and setting ENOSPC" << dendl;
-        objectcacher->purge_set(&inode->oset);
-        inode->async_err = -ENOSPC;
+    const OSDMap *osd_map = objecter->get_osdmap_read();
+    const map<int64_t,pg_pool_t>& pools = osd_map->get_pools();
+    for (map<int64_t,pg_pool_t>::const_iterator i = pools.begin();
+         i != pools.end(); ++i) {
+      if (i->second.has_flag(pg_pool_t::FLAG_FULL)) {
+        full_pools.push_back(i->first);
       }
     }
 
-    set_cap_epoch_barrier(cancelled_epoch);
+    objecter->put_osdmap_read();
+
+    for (std::vector<int64_t>::iterator i = full_pools.begin();
+         i != full_pools.end(); ++i) {
+      _handle_full_flag(*i);
+    }
+
+    // Subscribe to subsequent maps to watch for the full flag going
+    // away.  For the global full flag objecter does this for us, but
+    // it pays no attention to the per-pool full flag so in this branch
+    // we do it ourselves.
+    if (!full_pools.empty()) {
+      objecter->maybe_request_map();
+    }
   }
 
   m->put();
@@ -3031,11 +3085,11 @@ void Client::check_caps(Inode *in, bool is_delayed)
 }
 
 
-void Client::queue_cap_snap(Inode *in, snapid_t seq)
+void Client::queue_cap_snap(Inode *in, SnapContext& old_snapc)
 {
   int used = get_caps_used(in);
   int dirty = in->caps_dirty();
-  ldout(cct, 10) << "queue_cap_snap " << *in << " seq " << seq << " used " << ccap_string(used) << dendl;
+  ldout(cct, 10) << "queue_cap_snap " << *in << " snapc " << old_snapc << " used " << ccap_string(used) << dendl;
 
   if (in->cap_snaps.size() &&
       in->cap_snaps.rbegin()->second->writing) {
@@ -3046,8 +3100,8 @@ void Client::queue_cap_snap(Inode *in, snapid_t seq)
 	     (dirty & CEPH_CAP_ANY_WR)) {
     in->get();
     CapSnap *capsnap = new CapSnap(in);
-    in->cap_snaps[seq] = capsnap;
-    capsnap->context = in->snaprealm->get_snap_context();
+    in->cap_snaps[old_snapc.seq] = capsnap;
+    capsnap->context = old_snapc;
     capsnap->issued = in->caps_issued();
     capsnap->dirty = in->caps_dirty();
     
@@ -3300,7 +3354,7 @@ bool Client::_flush(Inode *in, Context *onfinish)
     return true;
   }
 
-  if (objecter->osdmap_full_flag()) {
+  if (objecter->osdmap_pool_full(in->layout.fl_pg_pool)) {
     ldout(cct, 1) << __func__ << ": FULL, purging for ENOSPC" << dendl;
     objectcacher->purge_set(&in->oset);
     if (onfinish) {
@@ -3858,11 +3912,19 @@ bool Client::adjust_realm_parent(SnapRealm *realm, inodeno_t parent)
   return false;
 }
 
+static bool has_new_snaps(const SnapContext& old_snapc,
+			  const SnapContext& new_snapc)
+{
+	return !new_snapc.snaps.empty() && new_snapc.snaps[0] > old_snapc.seq;
+}
+
 
 inodeno_t Client::update_snap_trace(bufferlist& bl, bool flush)
 {
   inodeno_t first_realm = 0;
   ldout(cct, 10) << "update_snap_trace len " << bl.length() << dendl;
+
+  map<SnapRealm*, SnapContext> dirty_realms;
 
   bufferlist::iterator p = bl.begin();
   while (!p.end()) {
@@ -3871,6 +3933,8 @@ inodeno_t Client::update_snap_trace(bufferlist& bl, bool flush)
     if (first_realm == 0)
       first_realm = info.ino();
     SnapRealm *realm = get_snap_realm(info.ino());
+
+    bool invalidate = false;
 
     if (info.seq() > realm->seq) {
       ldout(cct, 10) << "update_snap_trace " << *realm << " seq " << info.seq() << " > " << realm->seq
@@ -3884,28 +3948,19 @@ inodeno_t Client::update_snap_trace(bufferlist& bl, bool flush)
 	while (!q.empty()) {
 	  SnapRealm *realm = q.front();
 	  q.pop_front();
-	  ldout(cct, 10) << " flushing caps on " << *realm << dendl;
-
-	  xlist<Inode*>::iterator p = realm->inodes_with_caps.begin();
-	  while (!p.end()) {
-	    Inode *in = *p;
-	    ++p;
-	    queue_cap_snap(in, realm->get_snap_context().seq);
-	  }
 
 	  for (set<SnapRealm*>::iterator p = realm->pchildren.begin(); 
-	       p != realm->pchildren.end(); 
+	       p != realm->pchildren.end();
 	       ++p)
 	    q.push_back(*p);
+
+	  if (dirty_realms.count(realm) == 0) {
+	    realm->nref++;
+	    dirty_realms[realm] = realm->get_snap_context();
+	  }
 	}
       }
 
-    }
-
-    // _always_ verify parent
-    bool invalidate = adjust_realm_parent(realm, info.parent());
-
-    if (info.seq() > realm->seq) {
       // update
       realm->seq = info.seq();
       realm->created = info.created();
@@ -3914,6 +3969,11 @@ inodeno_t Client::update_snap_trace(bufferlist& bl, bool flush)
       realm->my_snaps = info.my_snaps;
       invalidate = true;
     }
+
+    // _always_ verify parent
+    if (adjust_realm_parent(realm, info.parent()))
+      invalidate = true;
+
     if (invalidate) {
       invalidate_snaprealm_and_children(realm);
       ldout(cct, 15) << "update_snap_trace " << *realm << " self|parent updated" << dendl;
@@ -3923,6 +3983,25 @@ inodeno_t Client::update_snap_trace(bufferlist& bl, bool flush)
 	       << " <= " << realm->seq << " and same parent, SKIPPING" << dendl;
     }
         
+    put_snap_realm(realm);
+  }
+
+  for (map<SnapRealm*, SnapContext>::iterator q = dirty_realms.begin();
+       q != dirty_realms.end();
+       ++q) {
+    SnapRealm *realm = q->first;
+    // if there are new snaps ?
+    if (has_new_snaps(q->second, realm->get_snap_context())) { 
+      ldout(cct, 10) << " flushing caps on " << *realm << dendl;
+      xlist<Inode*>::iterator r = realm->inodes_with_caps.begin();
+      while (!r.end()) {
+	Inode *in = *r;
+	++r;
+	queue_cap_snap(in, q->second);
+      }
+    } else {
+      ldout(cct, 10) << " no new snap on " << *realm << dendl;
+    }
     put_snap_realm(realm);
   }
 
@@ -3943,6 +4022,7 @@ void Client::handle_snap(MClientSnap *m)
 
   list<Inode*> to_move;
   SnapRealm *realm = 0;
+  SnapContext old_snapc;
 
   if (m->head.op == CEPH_SNAP_OP_SPLIT) {
     assert(m->head.split);
@@ -3954,6 +4034,7 @@ void Client::handle_snap(MClientSnap *m)
     // flush, then move, ino's.
     realm = get_snap_realm(info.ino());
     ldout(cct, 10) << " splitting off " << *realm << dendl;
+    old_snapc = realm->get_snap_context();
     for (vector<inodeno_t>::iterator p = m->split_inos.begin();
 	 p != m->split_inos.end();
 	 ++p) {
@@ -3969,8 +4050,6 @@ void Client::handle_snap(MClientSnap *m)
 	}
 	ldout(cct, 10) << " moving " << *in << " from " << *in->snaprealm << dendl;
 
-	// queue for snap writeback
-	queue_cap_snap(in, in->snaprealm->get_snap_context().seq);
 
 	in->snaprealm_item.remove_myself();
 	put_snap_realm(in->snaprealm);
@@ -3994,11 +4073,15 @@ void Client::handle_snap(MClientSnap *m)
   update_snap_trace(m->bl, m->head.op != CEPH_SNAP_OP_DESTROY);
 
   if (realm) {
+    bool queue_snap = has_new_snaps(old_snapc, realm->get_snap_context());
     for (list<Inode*>::iterator p = to_move.begin(); p != to_move.end(); ++p) {
       Inode *in = *p;
       in->snaprealm = realm;
       realm->inodes_with_caps.push_back(&in->snaprealm_item);
       realm->nref++;
+      // queue for snap writeback
+      if (queue_snap)
+	queue_cap_snap(in, old_snapc);
     }
     put_snap_realm(realm);
   }
@@ -4948,6 +5031,7 @@ void Client::tick()
     check_caps(in, true);
   }
 
+  trim_cache(true);
 }
 
 void Client::renew_caps()
@@ -7324,12 +7408,12 @@ int Client::_write(Fh *f, int64_t offset, uint64_t size, const char *buf)
   if ((uint64_t)(offset+size) > mdsmap->get_max_filesize()) //too large!
     return -EFBIG;
 
-  if (objecter->osdmap_full_flag()) {
-    return -ENOSPC;
-  }
-
   //ldout(cct, 7) << "write fh " << fh << " size " << size << " offset " << offset << dendl;
   Inode *in = f->inode;
+
+  if (objecter->osdmap_pool_full(in->layout.fl_pg_pool)) {
+    return -ENOSPC;
+  }
 
   assert(in->snapid == CEPH_NOSNAP);
 
@@ -10096,10 +10180,12 @@ int Client::_fallocate(Fh *fh, int mode, int64_t offset, int64_t length)
   if ((mode & FALLOC_FL_PUNCH_HOLE) && !(mode & FALLOC_FL_KEEP_SIZE))
     return -EOPNOTSUPP;
 
-  if (objecter->osdmap_full_flag() && !(mode & FALLOC_FL_PUNCH_HOLE))
-    return -ENOSPC;
-
   Inode *in = fh->inode;
+
+  if (objecter->osdmap_pool_full(in->layout.fl_pg_pool)
+      && !(mode & FALLOC_FL_PUNCH_HOLE)) {
+    return -ENOSPC;
+  }
 
   if (in->snapid != CEPH_NOSNAP)
     return -EROFS;
@@ -10873,5 +10959,25 @@ void Client::set_cap_epoch_barrier(epoch_t e)
 {
   ldout(cct, 5) << __func__ << " epoch = " << e << dendl;
   cap_epoch_barrier = e;
+}
+
+const char** Client::get_tracked_conf_keys() const
+{
+  static const char* keys[] = {
+    "client_cache_size",
+    "client_cache_mid",
+    NULL
+  };
+  return keys;
+}
+
+void Client::handle_conf_change(const struct md_config_t *conf,
+				const std::set <std::string> &changed)
+{
+  if (changed.count("client_cache_size") ||
+      changed.count("client_cache_mid")) {
+    lru.lru_set_max(cct->_conf->client_cache_size);
+    lru.lru_set_midpoint(cct->_conf->client_cache_mid);
+  }
 }
 

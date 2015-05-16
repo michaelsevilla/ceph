@@ -1773,16 +1773,26 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
       ret = 0;
     }
   } else if (strcmp(nargs[0], "setomapval") == 0) {
-    if (!pool_name || nargs.size() < 4)
+    if (!pool_name || nargs.size() < 3 || nargs.size() > 4)
       usage_exit();
 
     string oid(nargs[1]);
     string key(nargs[2]);
-    string val(nargs[3]);
+
+    bufferlist bl;
+    if (nargs.size() == 4) {
+      string val(nargs[3]);
+      bl.append(val);
+    } else {
+      do {
+	ret = bl.read_fd(STDIN_FILENO, 1024); // from stdin
+	if (ret < 0) {
+	  goto out;
+        }
+      } while (ret > 0);
+    }
 
     map<string, bufferlist> values;
-    bufferlist bl;
-    bl.append(val);
     values[key] = bl;
 
     ret = io_ctx.omap_set(oid, values);
@@ -2270,7 +2280,7 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     }
     RadosBencher bencher(g_ceph_context, rados, io_ctx);
     bencher.set_show_time(show_time);
-    ret = bencher.aio_bench(operation, seconds, num_objs,
+    ret = bencher.aio_bench(operation, seconds,
 			    concurrent_ios, op_size, cleanup, run_name);
     if (ret != 0)
       cerr << "error during benchmark: " << ret << std::endl;

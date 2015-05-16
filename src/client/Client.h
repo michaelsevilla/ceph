@@ -214,7 +214,7 @@ struct dir_result_t {
   }
 };
 
-class Client : public Dispatcher {
+class Client : public Dispatcher, public md_config_obs_t {
  public:
   using Dispatcher::cct;
 
@@ -439,7 +439,7 @@ protected:
   void touch_dn(Dentry *dn);
 
   // trim cache.
-  void trim_cache();
+  void trim_cache(bool trim_kernel_dcache=false);
   void trim_cache_for_reconnect(MetaSession *s);
   void trim_dentry(Dentry *dn);
   void trim_caps(MetaSession *s, int max);
@@ -481,6 +481,14 @@ protected:
   std::map<int64_t, int> pool_perms;
   list<Cond*> waiting_for_pool_perm;
   int check_pool_perm(Inode *in, int need);
+
+  /**
+   * Call this when an OSDMap is seen with a full flag (global or per pool)
+   * set.
+   *
+   * @param pool the pool ID affected, or -1 if all.
+   */
+  void _handle_full_flag(int64_t pool);
 
  public:
   void set_filer_flags(int flags);
@@ -546,7 +554,7 @@ protected:
   void put_cap_ref(Inode *in, int cap);
   void flush_snaps(Inode *in, bool all_again=false, CapSnap *again=0);
   void wait_sync_caps(uint64_t want);
-  void queue_cap_snap(Inode *in, snapid_t seq=0);
+  void queue_cap_snap(Inode *in, SnapContext &old_snapc);
   void finish_cap_snap(Inode *in, CapSnap *capsnap, int used);
   void _flushed_cap_snap(Inode *in, snapid_t seq);
 
@@ -966,6 +974,10 @@ public:
 
   void ll_register_callbacks(struct client_callback_args *args);
   int test_dentry_handling(bool can_invalidate);
+
+  virtual const char** get_tracked_conf_keys() const;
+  virtual void handle_conf_change(const struct md_config_t *conf,
+	                          const std::set <std::string> &changed);
 };
 
 #endif
