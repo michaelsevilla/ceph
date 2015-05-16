@@ -10,6 +10,7 @@ dist_noinst_DATA = \
 	librbd.tp \
 	oprequest.tp \
 	osd.tp \
+	mds.tp \
 	pg.tp \
 	objectstore.tp
 
@@ -19,6 +20,8 @@ nodist_libosd_tp_la_SOURCES = \
 	oprequest.h \
 	osd.c \
 	osd.h \
+        mds.c \
+        mds.h \
 	pg.h \
 	pg.c
 endif
@@ -68,6 +71,7 @@ BUILT_SOURCES = \
 	librbd.h \
 	oprequest.h \
 	osd.h \
+	mds.h \
 	pg.h \
 	objectstore.h
 endif
