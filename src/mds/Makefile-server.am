@@ -3,6 +3,9 @@ if WITH_MDS
 libmds_la_SOURCES = $(LIBMDS_SOURCES)
 libmds_la_LIBADD = $(LIBMDS_DEPS)
 noinst_LTLIBRARIES += libmds.la
+if WITH_LTTNG
+libmds_la_LIBADD += $(LIBMDS_TP)
+endif
 
 noinst_HEADERS += \
 	mds/inode_backtrace.h \

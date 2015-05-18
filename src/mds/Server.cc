@@ -1109,7 +1109,7 @@ void Server::reply_client_request(MDRequestRef& mdr, MClientReply *reply)
   if (!did_early_reply && !is_replay) {
 
     mds->logger->inc(l_mds_reply);
-    tracepoint(mds, req_exit, this, mdr->client_request->get_op());
+    //tracepoint(mds, req_exit, this, mdr->client_request->get_op());
     utime_t lat = ceph_clock_now(g_ceph_context) - mdr->client_request->get_recv_stamp();
     mds->logger->tinc(l_mds_reply_latency, lat);
     dout(20) << "lat " << lat << dendl;
@@ -1282,7 +1282,7 @@ void Server::handle_client_request(MClientRequest *req)
 {
   dout(4) << "handle_client_request " << *req << dendl;
 
-  tracepoint(mds, req_enter, this, req->get_op());
+  //tracepoint(mds, req_enter, this, req->get_op());
   if (mds->logger)
     mds->logger->inc(l_mds_request);
   if (logger)
