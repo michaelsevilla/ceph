@@ -1,6 +1,6 @@
 #include "include/int_types.h"
 
-TRACEPOINT_EVENT(mds, req_enter,
+TRACEPOINT_EVENT(mds, req_received,
     TP_ARGS(
         const void *, addr,
         int32_t, type),
@@ -10,7 +10,17 @@ TRACEPOINT_EVENT(mds, req_enter,
     )
 )
 
-TRACEPOINT_EVENT(mds, req_exit,
+TRACEPOINT_EVENT(mds, req_replied,
+    TP_ARGS(
+        const void *, addr,
+        int32_t, type),
+    TP_FIELDS(
+        ctf_integer_hex(unsigned long, addr, addr)
+        ctf_integer(int32_t, type, type)
+    )
+)
+
+TRACEPOINT_EVENT(mds, req_early_replied,
     TP_ARGS(
         const void *, addr,
         int32_t, type),
