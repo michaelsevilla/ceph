@@ -17,7 +17,6 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Library Public License for more details.
 #
-CEPH_HELPER_VERBOSE=false
 TIMEOUT=120
 PG_NUM=4
 
@@ -193,7 +192,7 @@ function kill_daemons() {
     local dir=$1
     local signal=${2:-KILL}
     local name_prefix=$3 # optional, osd, mon, osd.1
-    local delays=${4:-0 1 1 1 2 3 5 5 5 10 10 20 60}
+    local delays=${4:-0 0 1 1 1 2 3 5 5 5 10 10 20 60}
 
     local status=0
     for pidfile in $(find $dir | grep $name_prefix'[^/]*\.pid') ; do
@@ -201,6 +200,7 @@ function kill_daemons() {
         local send_signal=$signal
         local kill_complete=false
         for try in $delays ; do
+            sleep $try
             if kill -$send_signal $pid 2> /dev/null ; then
                 kill_complete=false
             else
@@ -208,7 +208,6 @@ function kill_daemons() {
                 break
             fi
             send_signal=0
-            sleep $try
         done
         if ! $kill_complete ; then
             status=1
@@ -402,7 +401,6 @@ function run_osd() {
     ceph_disk_args+=" --statedir=$dir"
     ceph_disk_args+=" --sysconfdir=$dir"
     ceph_disk_args+=" --prepend-to-path="
-    $CEPH_HELPER_VERBOSE && ceph_disk_args+=" --verbose"
 
     mkdir -p $osd_data
     ceph-disk $ceph_disk_args \
@@ -485,7 +483,6 @@ function activate_osd() {
     ceph_disk_args+=" --statedir=$dir"
     ceph_disk_args+=" --sysconfdir=$dir"
     ceph_disk_args+=" --prepend-to-path="
-    $CEPH_HELPER_VERBOSE && ceph_disk_args+=" --verbose"
 
     local ceph_args="$CEPH_ARGS"
     ceph_args+=" --osd-backfill-full-ratio=.99"
@@ -652,7 +649,7 @@ function get_config() {
     local config=$3
 
     CEPH_ARGS='' \
-        ceph --format xml daemon $dir/ceph-mon.$id.asok \
+        ceph --format xml daemon $dir/ceph-$daemon.$id.asok \
         config get $config 2> /dev/null | \
         $XMLSTARLET sel -t -m "//$config" -v . -n
 }
@@ -660,8 +657,46 @@ function get_config() {
 function test_get_config() {
     local dir=$1
 
+    # override the default config using command line arg and check it
     setup $dir || return 1
     run_mon $dir a --osd_pool_default_size=1 || return 1
+    test $(get_config mon a osd_pool_default_size) = 1 || return 1
+    run_osd $dir 0 --osd_max_scrubs=3 || return 1
+    test $(get_config osd 0 osd_max_scrubs) = 3 || return 1
+    teardown $dir || return 1
+}
+
+##
+# Set the **config** to specified **value**, via the config set command
+# of the admin socket of **daemon**.**id**
+#
+# @param daemon mon or osd
+# @parma id mon or osd ID
+# @param config the configuration variable name as found in config_opts.h
+# @param value the config value
+# @return 0 on success, 1 on error
+#
+function set_config() {
+    local daemon=$1
+    local id=$2
+    local config=$3
+    local value=$4
+
+    CEPH_ARGS='' \
+        ceph --format xml daemon $dir/ceph-$daemon.$id.asok \
+        config set $config $value 2> /dev/null | \
+        $XMLSTARLET sel -Q -t -m "//success" -v .
+}
+
+function test_set_config() {
+    local dir=$1
+
+    setup $dir || return 1
+    run_mon $dir a --osd_pool_default_size=1 || return 1
+    test $(get_config mon a ms_crc_header) = true || return 1
+    set_config mon a ms_crc_header false || return 1
+    test $(get_config mon a ms_crc_header) = false || return 1
+    set_config mon a ms_crc_header true || return 1
     test $(get_config mon a ms_crc_header) = true || return 1
     teardown $dir || return 1
 }
@@ -955,7 +990,7 @@ function wait_for_clean() {
             num_active_clean=$cur_active_clean
         fi
         sleep 1
-        (( timer++ ))
+        timer=$(expr $timer + 1)
     done
     return 0
 }
@@ -1065,14 +1100,19 @@ function test_expect_failure() {
 
 ##
 # Call the **run** function (which must be defined by the caller) with
-# the **dir** argument followed by the caller argument list. The
-# **setup** function is called before the **run** function and the
-# **teardown** function is called after to cleanup leftovers. The
-# environment is prepared to protect the **run** function from
-# pre-existing variables.
+# the **dir** argument followed by the caller argument list.
 #
-# The shell is required to display the function a line number whenever
-# a statement is executed to facilitate debugging.
+# **teardown** function is called when the **run** function returns
+# (on success or on error), to cleanup leftovers. The CEPH_CONF is set
+# to /dev/null and CEPH_ARGS is unset so that the tests are protected from
+# external interferences.
+#
+# It is the responsibility of the **run** function to call the
+# **setup** function to prepare the test environment (create a temporary
+# directory etc.).
+#
+# The shell is required (via PS4) to display the function and line
+# number whenever a statement is executed to help debugging.
 #
 # @param dir directory in which all data is stored
 # @param ... arguments passed transparently to **run**
@@ -1084,7 +1124,6 @@ function main() {
 
     set -x
     PS4='${FUNCNAME[0]}: $LINENO: '
-    #CEPH_HELPER_VERBOSE=true
 
     export PATH=:$PATH # make sure program from sources are prefered
 

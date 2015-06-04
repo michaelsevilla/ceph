@@ -98,6 +98,7 @@ int StripObjectMap::save_strip_header(StripObjectHeaderRef strip_header,
     ::encode(*strip_header, strip_header->header->data);
 
     set_header(strip_header->cid, strip_header->oid, *(strip_header->header), t);
+    strip_header->updated = false;
   }
   return 0;
 }
@@ -375,9 +376,10 @@ void KeyValueStore::BufferTransaction::set_buffer_keys(
   store->backend->set_keys(strip_header->header, prefix, values, t);
 
   uniq_id uid = make_pair(strip_header->cid, strip_header->oid);
+  map<pair<string, string>, bufferlist> &uid_buffers = buffers[uid];
   for (map<string, bufferlist>::iterator iter = values.begin();
        iter != values.end(); ++iter) {
-    buffers[uid][make_pair(prefix, iter->first)].swap(iter->second);
+    uid_buffers[make_pair(prefix, iter->first)].swap(iter->second);
   }
 }
 
@@ -462,11 +464,13 @@ int KeyValueStore::BufferTransaction::submit_transaction()
     if (header->deleted)
       continue;
 
-    r = store->backend->save_strip_header(header, t);
+    if (header->updated) {
+      r = store->backend->save_strip_header(header, t);
 
-    if (r < 0) {
-      dout(10) << __func__ << " save strip header failed " << dendl;
-      goto out;
+      if (r < 0) {
+        dout(10) << __func__ << " save strip header failed " << dendl;
+        goto out;
+      }
     }
   }
 
@@ -577,6 +581,11 @@ int KeyValueStore::statfs(struct statfs *buf)
     return r;
   }
   return 0;
+}
+
+void KeyValueStore::collect_metadata(map<string,string> *pm)
+{
+  (*pm)["keyvaluestore_backend"] = superblock.backend;
 }
 
 int KeyValueStore::mkfs()
@@ -1873,6 +1882,7 @@ int KeyValueStore::_generic_write(StripObjectMap::StripObjectHeaderRef header,
   if (len + offset > header->max_size) {
     header->max_size = len + offset;
     header->bits.resize(header->max_size/header->strip_size+1);
+    header->updated = true;
   }
 
   vector<StripObjectMap::StripExtent> extents;
@@ -1933,13 +1943,13 @@ int KeyValueStore::_generic_write(StripObjectMap::StripObjectHeaderRef header,
         value.append_zero(header->strip_size-value.length());
 
       header->bits[iter->no] = 1;
+      header->updated = true;
     }
     assert(value.length() == header->strip_size);
     values[key].swap(value);
   }
   assert(bl_offset == len);
 
-  header->updated = true;
   t.set_buffer_keys(header, OBJECT_STRIP_PREFIX, values);
   dout(10) << __func__ << " " << header->cid << "/" << header->oid << " "
            << offset << "~" << len << " = " << r << dendl;

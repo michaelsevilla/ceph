@@ -220,6 +220,15 @@ function test_mark_init() {
     $rm -fr $osd_data
 }
 
+function test_zap() {
+    local osd_data=$DIR/dir
+    $mkdir -p $osd_data
+
+    ./ceph-disk $CEPH_DISK_ARGS zap $osd_data 2>&1 | grep 'not full block device' || return 1
+
+    $rm -fr $osd_data
+}
+
 # ceph-disk prepare returns immediately on success if the magic file
 # exists in the --osd-data directory.
 function test_activate_dir_magic() {
@@ -419,7 +428,9 @@ function reset_leftover_dev() {
     local path=$1
 
     losetup --all | sed -e 's/://' | while read dev id associated_path ; do
-        if test $associated_path = "($path)" ; then
+        # if $path has been deleted with a dev attached, then $associated_path
+        # will carry "($path (deleted))".
+        if test "$associated_path" = "($path)" ; then
             reset_dev $dev
             losetup --detach $dev
         fi
@@ -611,6 +622,7 @@ function run() {
     default_actions+="test_activate_dir "
     default_actions+="test_keyring_path "
     default_actions+="test_mark_init "
+    default_actions+="test_zap "
     local actions=${@:-$default_actions}
     local status
     for action in $actions  ; do
