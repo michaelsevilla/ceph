@@ -123,16 +123,25 @@ static const char *LUA_RETURN =
   "for i=1,#targets do ret = ret..targets[i]..\" \" end\n"
   "io.close(f)\n"
   "return ret";
-static const char *LUA_PREPARE_HOWMUCH =
-  "package.path = package.path .. ';/home/msevilla/code/ceph/src/mds/balancers/modules/?.lua;'\n"
-  "require \"MDSBinPacker\"\n"
-  "-- begin MDS_BAL_HOWMUCH --\n"
+//static const char *LUA_PREPARE_HOWMUCH =
+//  "package.path = package.path .. ';/home/msevilla/code/ceph/src/mds/balancers/modules/?.lua;'\n"
+//  "require \"MDSBinPacker\"\n"
+//  "-- begin MDS_BAL_HOWMUCH --\n"
+//  "strategies = ";
+//  //{\"half\", \"big_half\", \"small_half\", \"big_first\", \"big_first_plus1\", \"small_first\", \"small_first_plus1\"}\n
+//static const char *LUA_RETURN_HOWMUCH =
+//  "\n"
+//  "-- end   MDS_BAL_HOWMUCH --\n"
+//  "return MDSBinPacker.pack(strategies, arg)";
+static const char *LUA_IMPORT_HOWMUCH = 
+  "package.path = package.path .. ';";
+static const char *LUA_INIT_HOWMUCH = 
+  "?.lua;'\n"
+  "require \"libbinpacker\"\n"
   "strategies = ";
-  //{\"half\", \"big_half\", \"small_half\", \"big_first\", \"big_first_plus1\", \"small_first\", \"small_first_plus1\"}\n
-static const char *LUA_RETURN_HOWMUCH =
-  "\n"
-  "-- end   MDS_BAL_HOWMUCH --\n"
-  "return MDSBinPacker.pack(strategies, arg)";
+static const char *LUA_INJECT_HOWMUCH = "\n"
+  "return libbinpacker.pack(strategies, arg)";
+
 
 /* This function DOES put the passed message before returning */
 int MDBalancer::proc_message(Message *m)
@@ -407,19 +416,14 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
       dump_subtree_loads();
       // let's go!
       //export_empties();  // no!
-      switch(g_conf->mds_bal_lua) {
-      case 0:
+      if (g_conf->mds_bal_metaload != "" &&
+          g_conf->mds_bal_mdsload != "" &&
+          g_conf->mds_bal_when != "" &&
+          g_conf->mds_bal_where != "" &&
+          g_conf->mds_bal_dir != "") 
+        custom_balancer();
+      else
         prep_rebalance(m->get_beat());
-        break;
-      case 1:
-        custom_balancer(g_conf->log_file.c_str());
-        break;
-      case 2:
-        pause_balancer(g_conf->log_file.c_str());
-        break;
-      default:
-        dout(2) << "not balancing, didn't specify whether to use Lua or not" << dendl;
-      }
     }
   }
 
@@ -486,7 +490,7 @@ void MDBalancer::dump_subtree_loads() {
 
 void MDBalancer::subtree_loads(CDir *dir, int depth) 
 {
-  if (depth > g_conf->mds_bal_print_dfs_depth) return;
+  if (depth > g_conf->mds_bal_debug_dfs_depth) return;
 
   utime_t now = ceph_clock_now(g_ceph_context);
   // breadth first traversal, break when we have enough samples
@@ -505,10 +509,10 @@ void MDBalancer::subtree_loads(CDir *dir, int depth)
          ++p) {
       CDir *subdir = *p;
       double metaload = subdir->pop_auth_subtree.meta_load(now, mds->mdcache->decayrate);
-      if (metaload >= g_conf->mds_bal_print_dfs_metaload) {
+      if (metaload >= g_conf->mds_bal_debug_dfs_metaload) {
         dout(10) << " pushing back load=" << metaload << " dir=" << *subdir << dendl;
         subtrees.push_back(subdir);
-        if (subtrees.size() > (size_t) g_conf->mds_bal_print_dfs) return;
+        if (subtrees.size() > (size_t) g_conf->mds_bal_debug_dfs) return;
       }
     }
   }
@@ -527,7 +531,7 @@ void MDBalancer::subtree_loads(CDir *dir, int depth)
          p != dfls.end();
          ++p) {
       subtree_loads(*p, depth+1);
-      if (subtrees.size() > (size_t) g_conf->mds_bal_print_dfs) return;
+      if (subtrees.size() > (size_t) g_conf->mds_bal_debug_dfs) return;
     }
   }
 
@@ -841,7 +845,7 @@ void MDBalancer::prep_rebalance(int beat)
 }
 
 // MSEVILLA
-void MDBalancer::custom_balancer(const char *log_file) 
+void MDBalancer::custom_balancer() 
 {
   int index = 1;
   char ret[LINE_MAX];
@@ -907,6 +911,7 @@ void MDBalancer::custom_balancer(const char *log_file)
   luaL_openlibs(L);
   lua_newtable(L);
  
+  const char *log_file = g_conf->log_file.c_str();
   dout(5) << "pushing the log file: " << log_file << dendl;
   lua_pushnumber(L, index++);
   lua_pushstring(L, log_file);
@@ -1032,15 +1037,7 @@ void MDBalancer::custom_balancer(const char *log_file)
   try_rebalance();
 }
 
-// MSEVILLA
-void MDBalancer::pause_balancer(const char *log_file) 
-{
-  while(g_conf->mds_bal_lua == 2) {
-    dout(0) << "waiting for you to change the mds_bal_design_pattern..." << dendl;
-    usleep(10 * 1000 * 1000);
-  }
-  custom_balancer(log_file);
-}
+
 
 void MDBalancer::try_rebalance()
 {
@@ -1201,7 +1198,7 @@ void MDBalancer::try_rebalance()
         smaller.insert(pair<double,CDir*>(rootpop, subdir));
       }
     }
-    if (g_conf->mds_bal_lua == 1 && g_conf->mds_bal_howmuch.compare(""))
+    if (g_conf->mds_bal_dir.compare("") && g_conf->mds_bal_howmuch.compare(""))
       fragment_selector_luahook(smaller, amount, exports, have, already_exporting); 
     else {
       // Use the old balancer policy (send off biggest dirfrags)
@@ -1373,7 +1370,7 @@ void MDBalancer::find_exports(CDir *dir,
 
   // grab some sufficiently big small items
   multimap<double,CDir*>::reverse_iterator it;
-  if (g_conf->mds_bal_lua == 1 && g_conf->mds_bal_howmuch.compare("")) {
+  if (g_conf->mds_bal_dir.compare("") && g_conf->mds_bal_howmuch.compare("")) {
     fragment_selector_luahook(smaller, amount, exports, have, already_exporting); 
     if (have > needmin)
       return;
@@ -1407,7 +1404,7 @@ void MDBalancer::find_exports(CDir *dir,
   }
 
   // ok fine, use smaller bits
-  if (g_conf->mds_bal_lua != 1 || !g_conf->mds_bal_howmuch.compare("")) {
+  if (!g_conf->mds_bal_dir.compare("") || !g_conf->mds_bal_howmuch.compare("")) {
     for (;
          it != smaller.rend();
          ++it) {
@@ -1434,7 +1431,6 @@ void MDBalancer::find_exports(CDir *dir,
 }
 
 
-// MSEVILLA
 // Do all 6 permutations, real quick, of what to send
 // Choose the one with the smallest net distance - this should help us emulate GIGA+
 // Fix the drill down afterwards - we don't want to drill down until we ABSOLUTELY have to
@@ -1449,17 +1445,20 @@ void MDBalancer::fragment_selector_luahook(multimap<double, CDir*> smaller,
     it = smaller.rbegin();
     dout(10) << "not enough fragments to select from, size=" << smaller.size() << dendl;
   } else {
-    char script[strlen(LUA_PREPARE_HOWMUCH) + 
+    char script[strlen(LUA_IMPORT_HOWMUCH) +
+                strlen(g_conf->mds_bal_dir.c_str())+
+                strlen(LUA_INIT_HOWMUCH) +
                 strlen(g_conf->mds_bal_howmuch.c_str()) + 
-                strlen(LUA_RETURN_HOWMUCH)];
+                strlen(LUA_INJECT_HOWMUCH)];
     char ret[LINE_MAX];
     int index = 1;
     vector<CDir *> frags;
     dout(2) << "using the Lua fragment selecter" << dendl;
-
-    strcpy(script, LUA_PREPARE_HOWMUCH);
+    strcpy(script, LUA_IMPORT_HOWMUCH);
+    strcat(script, g_conf->mds_bal_dir.c_str());
+    strcat(script, LUA_INIT_HOWMUCH);
     strcat(script, g_conf->mds_bal_howmuch.c_str());
-    strcat(script, LUA_RETURN_HOWMUCH);
+    strcat(script, LUA_INJECT_HOWMUCH);
 
     lua_State *L = luaL_newstate();
     luaL_openlibs(L);
@@ -1502,6 +1501,8 @@ void MDBalancer::fragment_selector_luahook(multimap<double, CDir*> smaller,
           lines++;
         }
       }
+      lua_close(L);
+      return;
     } else {
       strcpy(ret, lua_tostring(L, lua_gettop(L)));
     }
@@ -1528,6 +1529,7 @@ void MDBalancer::fragment_selector_luahook(multimap<double, CDir*> smaller,
     }
   }
 }
+
 
 
 void MDBalancer::hit_nfiles(double n) 
