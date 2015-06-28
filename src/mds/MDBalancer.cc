@@ -46,32 +46,17 @@ using std::vector;
 
 #define MIN_LOAD    50   //  ??
 #define MIN_REEXPORT 5  // will automatically reexport
-// MSEVILLA
-//#define MIN_OFFLOAD 10   // point at which i stop trying, close enough
 
-static const char *LUA_IMPORT =
-  "package.path = package.path .. ';/home/msevilla/code/ceph/src/mds/balancers/modules/?.lua;'\n"
-  "require \"MDSParser\"\n"
-  "function WRState(x)\n"
-  "  stateF = io.open(\"/tmp/balancer_state\", \"w\")\n"
-  "  stateF:write(x)\n"
-  "  io.close(stateF)\n"
-  "end\n"
-  "function RDState(x)\n"
-  "  stateF = io.open(\"/tmp/balancer_state\", \"r\")\n"
-  "  state = stateF:read(\"*all\")\n"
-  "  io.close(stateF)\n"
-  "  return state\n"
-  "end\n"
-  "function Max(x, y) if x > y then return x else return y end end\n"
-  "function Min(x, y) if x < y then return x else return y end end\n"
-  "whoami, MDSs, authmetaload, nfiles, allmetaload = MDSParser.parse_args(arg)\n"
+// these strings are pasted together to make a Lua executable string
+// -- this is very ugly. :(
+static const char *LUA_IMPORT = "package.path = package.path .. ';";
+static const char *LUA_INIT =
+  "?.lua;'\n"
+  "require \"libmantle\"\n"
+  "whoami, MDSs, authmetaload, nfiles, allmetaload = libmantle.parse_args(arg)\n"
   "i=whoami\n"
-  "-- begin MDS_BAL_MDSLOAD --\n"
   "MDSs[whoami][\"load\"] = ";
-static const char *LUA_CALCULATE_LOAD =
-  "\n"
-  "-- end   MDS_BAL_MDSLOAD --\n"
+static const char *LUA_CALCULATE_LOAD = "\n"
   "total = 0\n"
   "for i=1,#MDSs do\n"
   "  -- begin MDS_BAL_MDSLOAD --\n"
@@ -123,6 +108,7 @@ static const char *LUA_RETURN =
   "for i=1,#targets do ret = ret..targets[i]..\" \" end\n"
   "io.close(f)\n"
   "return ret";
+
 static const char *LUA_IMPORT_HOWMUCH = 
   "package.path = package.path .. ';";
 static const char *LUA_INIT_HOWMUCH = 
@@ -842,6 +828,8 @@ void MDBalancer::custom_balancer()
   string when = g_conf->mds_bal_when; 
   string where = g_conf->mds_bal_where; 
   char script[strlen(LUA_IMPORT) +
+              strlen(g_conf->mds_bal_dir.c_str()) + 
+              strlen(LUA_INIT) +
               strlen(g_conf->mds_bal_mdsload.c_str()) +
               strlen(LUA_CALCULATE_LOAD) + 
               strlen(g_conf->mds_bal_mdsload.c_str()) + 
@@ -851,6 +839,8 @@ void MDBalancer::custom_balancer()
               strlen(g_conf->mds_bal_where.c_str()) +
               strlen(LUA_RETURN)];
   strcpy(script, LUA_IMPORT);
+  strcat(script, g_conf->mds_bal_dir.c_str());
+  strcat(script, LUA_INIT);
   replace(mdsload.begin(), mdsload.end(), '_', ' ');
   size_t pos = 0;
   while((pos = mdsload.find("\\n", pos)) != string::npos)
