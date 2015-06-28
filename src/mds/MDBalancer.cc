@@ -123,16 +123,6 @@ static const char *LUA_RETURN =
   "for i=1,#targets do ret = ret..targets[i]..\" \" end\n"
   "io.close(f)\n"
   "return ret";
-//static const char *LUA_PREPARE_HOWMUCH =
-//  "package.path = package.path .. ';/home/msevilla/code/ceph/src/mds/balancers/modules/?.lua;'\n"
-//  "require \"MDSBinPacker\"\n"
-//  "-- begin MDS_BAL_HOWMUCH --\n"
-//  "strategies = ";
-//  //{\"half\", \"big_half\", \"small_half\", \"big_first\", \"big_first_plus1\", \"small_first\", \"small_first_plus1\"}\n
-//static const char *LUA_RETURN_HOWMUCH =
-//  "\n"
-//  "-- end   MDS_BAL_HOWMUCH --\n"
-//  "return MDSBinPacker.pack(strategies, arg)";
 static const char *LUA_IMPORT_HOWMUCH = 
   "package.path = package.path .. ';";
 static const char *LUA_INIT_HOWMUCH = 
@@ -141,7 +131,6 @@ static const char *LUA_INIT_HOWMUCH =
   "strategies = ";
 static const char *LUA_INJECT_HOWMUCH = "\n"
   "return libbinpacker.pack(strategies, arg)";
-
 
 /* This function DOES put the passed message before returning */
 int MDBalancer::proc_message(Message *m)
@@ -1431,9 +1420,8 @@ void MDBalancer::find_exports(CDir *dir,
 }
 
 
-// Do all 6 permutations, real quick, of what to send
-// Choose the one with the smallest net distance - this should help us emulate GIGA+
-// Fix the drill down afterwards - we don't want to drill down until we ABSOLUTELY have to
+// Quickly execute many dirfrag selectors and choose the best one
+//  - best quantified using the smallest net distance
 void MDBalancer::fragment_selector_luahook(multimap<double, CDir*> smaller,
                                            double amount,
                                            list<CDir*>& exports,
@@ -1445,44 +1433,49 @@ void MDBalancer::fragment_selector_luahook(multimap<double, CDir*> smaller,
     it = smaller.rbegin();
     dout(10) << "not enough fragments to select from, size=" << smaller.size() << dendl;
   } else {
+    lua_State *L = luaL_newstate();
+    luaL_openlibs(L);
+    lua_newtable(L);
+
+    // construct the Lua script
     char script[strlen(LUA_IMPORT_HOWMUCH) +
                 strlen(g_conf->mds_bal_dir.c_str())+
                 strlen(LUA_INIT_HOWMUCH) +
                 strlen(g_conf->mds_bal_howmuch.c_str()) + 
                 strlen(LUA_INJECT_HOWMUCH)];
-    char ret[LINE_MAX];
-    int index = 1;
-    vector<CDir *> frags;
-    dout(2) << "using the Lua fragment selecter" << dendl;
     strcpy(script, LUA_IMPORT_HOWMUCH);
     strcat(script, g_conf->mds_bal_dir.c_str());
     strcat(script, LUA_INIT_HOWMUCH);
     strcat(script, g_conf->mds_bal_howmuch.c_str());
     strcat(script, LUA_INJECT_HOWMUCH);
 
-    lua_State *L = luaL_newstate();
-    luaL_openlibs(L);
-    lua_newtable(L);
-    
-    dout(5) << "pushing log file: " << g_conf->log_file.c_str() << dendl;
-    lua_pushnumber(L, index++);
-    lua_pushstring(L, g_conf->log_file.c_str());
-    lua_settable(L, -3);
+    // pull out the important metrics
+    const char *log = g_conf->log_file.c_str();
 
-    dout(5) << "pushing target: " << amount << dendl;
+    dout(10) << "sending frags to Lua fragselector"
+             << " log=" << log 
+             << " target=" << amount 
+             << dendl;
+    vector<CDir *> frags;
+    int index = 1;
+    lua_pushnumber(L, index++);
+    lua_pushstring(L, log);
+    lua_settable(L, -3);
     lua_pushnumber(L, index++);
     lua_pushnumber(L, amount);
     lua_settable(L, -3);
-
     for (it = smaller.rbegin();
        it != smaller.rend();
        ++it) {
-      dout(5) << "pushing dirfrag: " << (*it).first << dendl;
+      dout(10) << "pushing dirfrag: " << (*it).first << dendl;
       lua_pushnumber(L, index++);
       lua_pushnumber(L, (*it).first);
       lua_settable(L, -3);
       frags.push_back((*it).second);
     }
+
+    // execute Lua frag selector
+    char ret[LINE_MAX];
     lua_setglobal(L, "arg");
     if (luaL_dostring(L, script) > 0) {
       dout(0) << " script failed: " << lua_tostring(L, lua_gettop(L)) << dendl;
@@ -1507,23 +1500,20 @@ void MDBalancer::fragment_selector_luahook(multimap<double, CDir*> smaller,
       strcpy(ret, lua_tostring(L, lua_gettop(L)));
     }
     lua_close(L);
-    if (!strcmp(ret, "-1")) {
-      dout(2) << " received " << ret << "; not gonna send from frags.size=" << frags.size()<< dendl;;
-    } else {
-      dout(2) << " received " << ret << "; gonna send from frags.size=" << frags.size()<< dendl;
+
+    // export the dirfrags selected by the frag selector
+    if (strcmp(ret, "-1")) {
       char *token = strtok(ret, " ");
       while (token != NULL) {
         char val[LINE_MAX] = "";
-        int df_index = -1;
-        double pop = -1;
-       
         strcpy(val, token);
-        df_index = atof(val) - 1;
-        pop = frags[df_index]->pop_auth_subtree.meta_load(rebalance_time, mds->mdcache->decayrate);
+        int df_index = atof(val) - 1;
+        double pop = frags[df_index]->pop_auth_subtree.meta_load(rebalance_time, mds->mdcache->decayrate);
+
+        dout(10) << " exporting df=" << df_index << " val=" << val << " pop=" << pop << " frag=" << *frags[df_index] << dendl;
         exports.push_back(frags[df_index]);
-        have += pop;
-        dout(10) << " df_index = " << df_index << " val=" << val << " pop=" << pop << " frag=" << *frags[df_index] << dendl;
         already_exporting.insert(frags[df_index]);
+        have += pop;
         token = strtok(NULL, " ");
       } 
     }
