@@ -50,64 +50,21 @@ using std::vector;
 // these strings are pasted together to make a Lua executable string
 // -- this is very ugly. :(
 static const char *LUA_IMPORT = "package.path = package.path .. ';";
-static const char *LUA_INIT =
-  "?.lua;'\n"
-  "require \"libmantle\"\n"
-  "whoami, MDSs, authmetaload, nfiles, allmetaload = libmantle.parse_args(arg)\n"
-  "i=whoami\n"
-  "MDSs[whoami][\"load\"] = ";
-static const char *LUA_CALCULATE_LOAD = "\n"
-  "total = 0\n"
+static const char *LUA_INIT = "?.lua;'\n require \"libmantle\"\n"
+  "log, whoami, MDSs, authmetaload, nfiles, allmetaload, targets = libmantle.parse_args(arg)\n"
   "for i=1,#MDSs do\n"
-  "  -- begin MDS_BAL_MDSLOAD --\n"
-  "  load = ";
-static const char *LUA_PREPARE_WHEN =
-  "\n"
-  "  -- end   MDS_BAL_MDSLOAD --\n"
-  "  MDSs[i][\"load\"] = load\n"
-  "  total = total + load\n"
+  "  MDSs[i][\"load\"] = ";
+static const char *LUA_CALCULATE_LOAD = "\n"
   "end\n"
-  "f = io.open(arg[1], \"a\")\n"
-  "io.output(f)\n"
-  "targets = {}\n"
-  "for i=1,#MDSs do targets[i] = 0 end\n"
-  "-- begin MDS_BAL_WHEN --\n";
-static const char *LUA_PREPARE_WHERE =
-  " \n"
-  "-- end   MDS_BAL_WHEN --\n"
-  "   io.write(string.format(\"  [Lua5.2] migrating! (whoami=%d authmetaload=%f nfiles=%f allmetaload=%f total=%f)\\n\", whoami, authmetaload, nfiles, allmetaload, total))\n"
-  "   E = {}; I = {}\n"
-  "   for i=1,#MDSs do\n"
-  "     metaload = MDSs[i][\"load\"]\n"
-  "     if metaload > total / #MDSs then E[i] = metaload\n"
-  "     else I[i] = metaload end\n"
-  "   end\n"
+  "total = libmantle.get_total(MDSs)\n"
+  "libmantle.print_metrics(arg[1], MDSs)\n";
+static const char *LUA_WHEN = "\n"
+  "   E, I = libmantle.get_exporters_importers(log, MDSs)\n"
   " else\n"
-  "   io.close(f)\n"
-  "   MDSParser.print_metrics(arg[1], MDSs)\n"
-  "   f = io.open(arg[1], \"a\")\n"
-  "   io.output(f)\n"
-  "   io.write(string.format(\"  [Lua5.2] not migrating! (whoami=%d authmetaload=%f nfiles=%f allmetaload=%f total=%f)\\n\", whoami, authmetaload, nfiles, allmetaload, total))\n"
-  "   ret = \"\"\n"
-  "   for i=1,#targets do ret = ret..targets[i]..\" \" end\n"
-  "   return ret\n"
-  " end\n"
-  "io.close(f)\n"
-  "MDSParser.print_metrics(arg[1], MDSs)\n"
-  "f = io.open(arg[1], \"a\")\n"
-  "io.output(f)\n"
-  "-- begin MDS_BAL_WHERE --\n";
-static const char *LUA_RETURN =
-  "\n"
-  "-- end   MDS_BAL_WHERE --\n"
-  "ret = \"\"\n"
-  "if targets[whoami] ~= 0 then\n"
-  "  for i=1,#targets do targets[i] = 0 end\n"
-  "  io.write(\"  [Lua5.2] Uh oh... trying to send load to myself, zeroing out targets array.\\n\")\n"
-  "end\n"
-  "for i=1,#targets do ret = ret..targets[i]..\" \" end\n"
-  "io.close(f)\n"
-  "return ret";
+  "   return libmantle.get_empty_targets(log, targets)\n"
+  " end\n";
+static const char *LUA_WHERE = "\n"
+  "return libmantle.convert_targets(log, targets)";
 
 static const char *LUA_IMPORT_HOWMUCH = 
   "package.path = package.path .. ';";
@@ -832,12 +789,10 @@ void MDBalancer::custom_balancer()
               strlen(LUA_INIT) +
               strlen(g_conf->mds_bal_mdsload.c_str()) +
               strlen(LUA_CALCULATE_LOAD) + 
-              strlen(g_conf->mds_bal_mdsload.c_str()) + 
-              strlen(LUA_PREPARE_WHEN) + 
               strlen(g_conf->mds_bal_when.c_str()) +
-              strlen(LUA_PREPARE_WHERE) +
+              strlen(LUA_WHEN) + 
               strlen(g_conf->mds_bal_where.c_str()) +
-              strlen(LUA_RETURN)];
+              strlen(LUA_WHERE)];
   strcpy(script, LUA_IMPORT);
   strcat(script, g_conf->mds_bal_dir.c_str());
   strcat(script, LUA_INIT);
@@ -847,20 +802,18 @@ void MDBalancer::custom_balancer()
     mdsload.replace(pos, 2, " \n");
   strcat(script, mdsload.c_str());
   strcat(script, LUA_CALCULATE_LOAD);
-  strcat(script, mdsload.c_str());
-  strcat(script, LUA_PREPARE_WHEN);
   replace(when.begin(), when.end(), '_', ' ');
   pos = 0;
   while((pos = when.find("\\n", pos)) != string::npos)
     when.replace(pos, 2, " \n");
   strcat(script, when.c_str());
-  strcat(script, LUA_PREPARE_WHERE);
+  strcat(script, LUA_WHEN);
   replace(where.begin(), where.end(), '_', ' ');
   pos = 0;
   while((pos = where.find("\\n", pos)) != string::npos)
     where.replace(pos, 2, " \n");
   strcat(script, where.c_str());
-  strcat(script, LUA_RETURN);
+  strcat(script, LUA_WHERE);
   rebalance_time = ceph_clock_now(g_ceph_context);
 
   mds_rank_t whoami = mds->get_nodeid();

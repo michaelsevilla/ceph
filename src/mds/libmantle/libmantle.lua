@@ -122,6 +122,24 @@ function get_empty_targets(log, MDSs)
   return ret
 end
 
+-- Convert the array of targets into a string; zero out targets
+-- if assignment is illegal
+-- @arg0:  log file
+-- @arg1:  array of loads 
+-- return: string of targets
+function convert_targets(log, targets)
+  ret = ""
+  if targets[whoami] ~= 0 then
+    for i=1,#targets do 
+      targets[i] = 0 
+    end
+  end
+  for i=1,#targets do 
+    ret = ret..targets[i].." " 
+  end
+  return ret
+end
+
 -- Sanity check the targets filled in by the custom balancer and return
 -- the targetes array "regardless of it erred out" as a string.
 -- @arg0:  log file
