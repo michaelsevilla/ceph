@@ -52,7 +52,6 @@ class MDBalancer {
   utime_t last_fragment;
   utime_t last_sample;    
   utime_t rebalance_time; //ensure a consistent view of load for rebalance
-  // MSEVILLA: for the customized CPU measurements
   double cpu_load_avg;
   double cpu_work_prev;
   double cpu_total_prev;
@@ -111,21 +110,26 @@ public:
   /*check if the monitor has recorded the current export targets;
     if it has then do the actual export. Otherwise send off our
     export targets message again*/
-  void subtree_loads(CDir *dir, int depth);
-  void dump_subtree_loads();
-  void pause_balancer(const char *log);
-  void custom_balancer();
   void try_rebalance();
   void find_exports(CDir *dir, 
                     double amount, 
                     list<CDir*>& exports, 
                     double& have,
                     set<CDir*>& already_exporting);
-  void fragment_selector_luahook(multimap<double, CDir*>,
-                                 double amount, 
-                                 list<CDir*>& exports, 
-                                 double& have,
-                                 set<CDir*>& already_exporting);
+  //Mantle hooks that allow customizable metadata balancers, 
+  //specified with Lua and injected with 'ceph tell'
+  void custom_balancer();
+  // Quickly execute many dirfrag selectors and choose the best one
+  //  - best quantified using the smallest net distance
+  void dirfrag_selector(multimap<double, CDir*>,
+                        double amount, 
+                        list<CDir*>& exports, 
+                        double& have,
+                        set<CDir*>& already_exporting);
+
+  //debug: print out the loads on a subset of the namespace
+  void subtree_loads(CDir *dir, int depth);
+  void dump_subtree_loads();
 
 
   void subtract_export(class CDir *ex, utime_t now);

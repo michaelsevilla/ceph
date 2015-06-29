@@ -8,14 +8,17 @@ Mantle depends in Lua:
 #Operation
 Point Mantle at the library directory:
 
-`ceph --admin-daemon ...asok config set mds_bal_dir ".../ceph/src/mds/balancers/"`
+`ceph --admin-daemon </path/to/daemon/socket> config set mds_bal_dir </path/to/this/library/>`
 
 Set values for all policies:
 
-`ceph --admin-daemon ...asok config set mds_bal_metaload    "IWR"`
-`ceph --admin-daemon ...asok config set mds_bal_mdsload     "MDSs[i]["cpu"]"`
-`ceph --admin-daemon ...asok config set mds_bal_when        "if MDSs[whoami]["cpu"] > 0.8 then"`
-`ceph --admin-daemon ...asok config set mds_bal_where       "for i=1,#targets do targets[i] = 0 end``"`
+`ceph --admin-daemon </path/to/daemon/socket> config set mds_bal_metaload    "IWR"`
+
+`ceph --admin-daemon </path/to/daemon/socket> config set mds_bal_mdsload     "MDSs[i]["cpu"]"`
+
+`ceph --admin-daemon </path/to/daemon/socket> config set mds_bal_when        "if MDSs[whoami]["cpu"] > 0.8 then"`
+
+`ceph --admin-daemon </path/to/daemon/socket> config set mds_bal_where       "for i=1,#targets do targets[i] = 0 end``"`
 
 
 
