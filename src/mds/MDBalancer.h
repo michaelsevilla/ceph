@@ -93,6 +93,8 @@ public:
     last_epoch_under(0), last_epoch_over(0), cpu_load_avg(0), cpu_work_prev(0), cpu_total_prev(0), total_meta_load(0), nfiles(0), my_load(0.0), target_load(0.0) { }
   
   mds_load_t get_load(utime_t);
+  void extract_load_from_heartbeat();
+  void parse_decision();
 
   int proc_message(Message *m);
   
@@ -119,6 +121,8 @@ public:
   //Mantle hooks that allow customizable metadata balancers, 
   //specified with Lua and injected with 'ceph tell'
   void custom_balancer();
+  string construct_balancer_script();
+  string format_policy(string s);
   // Quickly execute many dirfrag selectors and choose the best one
   //  - best quantified using the smallest net distance
   void dirfrag_selector(multimap<double, CDir*>,

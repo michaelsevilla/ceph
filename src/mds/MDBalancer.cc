@@ -54,7 +54,7 @@ static const char *LUA_INIT = "?.lua;'\n require \"libmantle\"\n"
   "log, whoami, MDSs, authmetaload, nfiles, allmetaload, targets = libmantle.parse_args(arg)\n"
   "for i=1,#MDSs do\n"
   "  MDSs[i][\"load\"] = ";
-static const char *LUA_CALCULATE_LOAD = "\n"
+static const char *LUA_LOAD = "\n"
   "end\n"
   "total = libmantle.get_total(MDSs)\n"
   "libmantle.print_metrics(arg[1], MDSs)\n";
@@ -66,9 +66,7 @@ static const char *LUA_WHEN = "\n"
 static const char *LUA_WHERE = "\n"
   "return libmantle.convert_targets(log, targets)";
 
-static const char *LUA_INIT_HOWMUCH = 
-  "?.lua;'\n"
-  "require \"libbinpacker\"\n"
+static const char *LUA_INIT_HOWMUCH = "?.lua;'\n require \"libbinpacker\"\n"
   "strategies = ";
 static const char *LUA_HOWMUCH = "\n"
   "return libbinpacker.pack(strategies, arg)";
@@ -347,10 +345,8 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
       dump_subtree_loads();
 
       // let's go!
-      if (g_conf->mds_bal_metaload != "" &&
-          g_conf->mds_bal_mdsload != "" &&
-          g_conf->mds_bal_when != "" &&
-          g_conf->mds_bal_where != "" &&
+      if (g_conf->mds_bal_metaload != "" && g_conf->mds_bal_mdsload != "" &&
+          g_conf->mds_bal_when != "" && g_conf->mds_bal_where != "" &&
           g_conf->mds_bal_dir != "") 
         custom_balancer();
       else
@@ -784,19 +780,6 @@ void MDBalancer::prep_rebalance(int beat)
 
 void MDBalancer::custom_balancer() 
 {
-  string mdsload = g_conf->mds_bal_mdsload; 
-  string when = g_conf->mds_bal_when; 
-  string where = g_conf->mds_bal_where; 
-  dout(5) << "- metaload = " << g_conf->mds_bal_metaload.c_str() << dendl;
-  dout(5) << "- mdsload  = " << mdsload << dendl;
-  dout(5) << "- when     = " << when << dendl;
-  dout(5) << "- where    = " << where << dendl;
-  dout(5) << "- howmuch  = " << g_conf->mds_bal_howmuch.c_str() << dendl;
-  if (!when.compare("") || !where.compare("")) {
-    dout(0) << "custom_balancer: missing when/where script, not making migration decisions" << dendl;
-    return;
-  }
-
   dout(5) << "Preparing transfer to Lua, clearing mytargets=" << my_targets.size()
           << " imported=" << imported.size() 
           << " exported=" << exported.size() 
@@ -805,44 +788,14 @@ void MDBalancer::custom_balancer()
   imported.clear();
   exported.clear();
   mds->mdcache->migrator->clear_export_queue();
+
   lua_State *L = luaL_newstate();
   luaL_openlibs(L);
   lua_newtable(L);
  
-  // construct the Lua script
-  char script[strlen(LUA_IMPORT) +
-              strlen(g_conf->mds_bal_dir.c_str()) + 
-              strlen(LUA_INIT) +
-              strlen(g_conf->mds_bal_mdsload.c_str()) +
-              strlen(LUA_CALCULATE_LOAD) + 
-              strlen(g_conf->mds_bal_when.c_str()) +
-              strlen(LUA_WHEN) + 
-              strlen(g_conf->mds_bal_where.c_str()) +
-              strlen(LUA_WHERE)];
-  strcpy(script, LUA_IMPORT);
-  strcat(script, g_conf->mds_bal_dir.c_str());
-  strcat(script, LUA_INIT);
-  replace(mdsload.begin(), mdsload.end(), '_', ' ');
-  size_t pos = 0;
-  while((pos = mdsload.find("\\n", pos)) != string::npos)
-    mdsload.replace(pos, 2, " \n");
-  strcat(script, mdsload.c_str());
-  strcat(script, LUA_CALCULATE_LOAD);
-  replace(when.begin(), when.end(), '_', ' ');
-  pos = 0;
-  while((pos = when.find("\\n", pos)) != string::npos)
-    when.replace(pos, 2, " \n");
-  strcat(script, when.c_str());
-  strcat(script, LUA_WHEN);
-  replace(where.begin(), where.end(), '_', ' ');
-  pos = 0;
-  while((pos = where.find("\\n", pos)) != string::npos)
-    where.replace(pos, 2, " \n");
-  strcat(script, where.c_str());
-  strcat(script, LUA_WHERE);
-  rebalance_time = ceph_clock_now(g_ceph_context);
-
   // pull out some important metrics
+  rebalance_time = ceph_clock_now(g_ceph_context);
+  //vector<pair<string, > args;
   mds_rank_t whoami = mds->get_nodeid();
   int cluster_size = mds->get_mds_map()->get_num_in_mds();
   const char *log_file = g_conf->log_file.c_str();
@@ -916,26 +869,39 @@ void MDBalancer::custom_balancer()
     lua_settable(L, -3);
   }
   
-  dout(20) << " kicking control off to Lua for making migration decisions based on policy" << dendl;
+  dout(20) << " constructing migration script based on user-defined policies" << dendl;
+  dout(5) << "- metaload = " << g_conf->mds_bal_metaload << dendl;
+  dout(5) << "- mdsload  = " << g_conf->mds_bal_mdsload << dendl;
+  dout(5) << "- when     = " << g_conf->mds_bal_when << dendl;
+  dout(5) << "- where    = " << g_conf->mds_bal_where << dendl;
+  dout(5) << "- howmuch  = " << g_conf->mds_bal_howmuch << dendl;
+  string script = LUA_IMPORT + g_conf->mds_bal_dir + LUA_INIT +
+                  format_policy(g_conf->mds_bal_mdsload) + LUA_LOAD +
+                  format_policy(g_conf->mds_bal_when) + LUA_WHEN +
+                  format_policy(g_conf->mds_bal_where) + LUA_WHERE;
   lua_setglobal(L, "arg");
   char ret[LINE_MAX];
-  if (luaL_dostring(L, script) > 0) {
+  if (luaL_dostring(L, script.c_str()) > 0) {
     dout(0) << " script failed: " << lua_tostring(L, lua_gettop(L)) << dendl;
-    char *start = script;
-    size_t nchars = 0;
-    size_t lines = 1;
-    for (size_t i = 0; i < strlen(script); i++) {
-      nchars++;
-      if (script[i] == '\n') {
-        char line[LINE_MAX] = "";
-        script[i] = ' ';
-        strncpy(line, start, nchars);
-        dout(10) << lines << ". " << line << dendl;
-        start = start + nchars;
-        nchars = 0;
-        lines++;
-      }
-    }
+    std::ifstream script_stream(script.c_str());
+    string line; 
+    for (size_t i = 0; std::getline(script_stream, line); i++)
+      dout(10) << i << ". " << line << dendl;
+    //char *start = script;
+    //size_t nchars = 0;
+    //size_t lines = 1;
+    //for (size_t i = 0; i < strlen(script); i++) {
+    //  nchars++;
+    //  if (script[i] == '\n') {
+    //    char line[LINE_MAX] = "";
+    //    script[i] = ' ';
+    //    strncpy(line, start, nchars);
+    //    dout(10) << lines << ". " << line << dendl;
+    //    start = start + nchars;
+    //    nchars = 0;
+    //    lines++;
+    //  }
+    //}
     lua_close(L);
     return;
   }
@@ -959,6 +925,17 @@ void MDBalancer::custom_balancer()
   }
   dout(2) << " done executing, ret=" << ret << " made targets=" << my_targets << dendl; 
   try_rebalance();
+}
+
+
+
+string MDBalancer::format_policy(string s) {
+  string ret = s;
+  replace(ret.begin(), ret.end(), '_', ' ');
+  size_t pos = 0;
+  while((pos = ret.find("\\n", pos)) != string::npos)
+    ret.replace(pos, 2, " \n");
+  return ret; 
 }
 
 
@@ -1675,10 +1652,6 @@ void MDBalancer::add_import(CDir *dir, utime_t now)
     dir->pop_auth_subtree_nested.add(now, mds->mdcache->decayrate, subload);
   }
 }
-
-
-
-
 
 
 void MDBalancer::show_imports(bool external)
