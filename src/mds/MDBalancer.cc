@@ -883,6 +883,7 @@ void MDBalancer::custom_balancer()
   }
 
   std::istringstream targets(lua_tostring(L, lua_gettop(L)));
+  lua_close(L);
   string target;
   for (mds_rank_t m = mds_rank_t(0); 
        std::getline(targets, target, ' ');
@@ -1364,32 +1365,25 @@ void MDBalancer::dirfrag_selector(multimap<double, CDir*> smaller,
 
     dout(20) << " kicking control off to Lua so it can select the dirfrags" << dendl;
     lua_setglobal(L, "arg");
-    char ret[LINE_MAX];
     if (luaL_dostring(L, script) > 0) {
       dout(0) << " script failed: " << lua_tostring(L, lua_gettop(L)) << dendl;
       dump_balancer(script);
       lua_close(L);
       return;
-    } else {
-      strcpy(ret, lua_tostring(L, lua_gettop(L)));
     }
+
+    std::istringstream selected_dirfrags(lua_tostring(L, lua_gettop(L)));
     lua_close(L);
+    string dirfrag;
+    while (std::getline(selected_dirfrags, dirfrag, ' ')) {
+      int df_index = atof(dirfrag.c_str()) - 1;
+      if (df_index < 0) continue;
+      double pop = frags[df_index]->pop_auth_subtree.meta_load(rebalance_time, mds->mdcache->decayrate);
 
-    // export the dirfrags selected by the frag selector
-    if (strcmp(ret, "-1")) {
-      char *token = strtok(ret, " ");
-      while (token != NULL) {
-        char val[LINE_MAX] = "";
-        strcpy(val, token);
-        int df_index = atof(val) - 1;
-        double pop = frags[df_index]->pop_auth_subtree.meta_load(rebalance_time, mds->mdcache->decayrate);
-
-        dout(10) << " exporting df=" << df_index << " val=" << val << " pop=" << pop << " frag=" << *frags[df_index] << dendl;
-        exports.push_back(frags[df_index]);
-        already_exporting.insert(frags[df_index]);
-        have += pop;
-        token = strtok(NULL, " ");
-      } 
+      dout(10) << " exporting df=" << df_index << " dirfrag=" << dirfrag << " pop=" << pop << " frag=" << *frags[df_index] << dendl;
+      exports.push_back(frags[df_index]);
+      already_exporting.insert(frags[df_index]);
+      have += pop;
     }
   }
 }
