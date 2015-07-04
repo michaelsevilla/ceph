@@ -183,8 +183,7 @@ mds_load_t MDBalancer::get_load(utime_t now)
   load.req_rate = mds->get_req_rate();
   load.queue_len = mds->messenger->get_dispatch_queue_len();
 
-  // use the instantaneous CPU utilization instead of load average
-  // this works better for flash crowds and hotspots`
+  // use instantaneous CPU util. (better for flash crowds/hotspots) instead of load average
   ifstream cpu("/proc/stat");
   if (cpu.is_open()) {
     // TODO: this should be cleaned up
@@ -869,67 +868,45 @@ void MDBalancer::custom_balancer()
     lua_settable(L, -3);
   }
   
-  dout(20) << " constructing migration script based on user-defined policies" << dendl;
-  dout(5) << "- metaload = " << g_conf->mds_bal_metaload << dendl;
-  dout(5) << "- mdsload  = " << g_conf->mds_bal_mdsload << dendl;
-  dout(5) << "- when     = " << g_conf->mds_bal_when << dendl;
-  dout(5) << "- where    = " << g_conf->mds_bal_where << dendl;
-  dout(5) << "- howmuch  = " << g_conf->mds_bal_howmuch << dendl;
+  dout(20) << " construct migration script based on user-defined policies" << dendl;
   string script = LUA_IMPORT + g_conf->mds_bal_dir + LUA_INIT +
                   format_policy(g_conf->mds_bal_mdsload) + LUA_LOAD +
                   format_policy(g_conf->mds_bal_when) + LUA_WHEN +
                   format_policy(g_conf->mds_bal_where) + LUA_WHERE;
+
   lua_setglobal(L, "arg");
-  char ret[LINE_MAX];
   if (luaL_dostring(L, script.c_str()) > 0) {
     dout(0) << " script failed: " << lua_tostring(L, lua_gettop(L)) << dendl;
-    std::ifstream script_stream(script.c_str());
-    string line; 
-    for (size_t i = 0; std::getline(script_stream, line); i++)
-      dout(10) << i << ". " << line << dendl;
-    //char *start = script;
-    //size_t nchars = 0;
-    //size_t lines = 1;
-    //for (size_t i = 0; i < strlen(script); i++) {
-    //  nchars++;
-    //  if (script[i] == '\n') {
-    //    char line[LINE_MAX] = "";
-    //    script[i] = ' ';
-    //    strncpy(line, start, nchars);
-    //    dout(10) << lines << ". " << line << dendl;
-    //    start = start + nchars;
-    //    nchars = 0;
-    //    lines++;
-    //  }
-    //}
+    dump_balancer(script);
     lua_close(L);
     return;
   }
 
-  // parse out the response
-  strcpy(ret, lua_tostring(L, lua_gettop(L)));
-  lua_close(L);
-  char *start = ret;
-  size_t nchars = 0;
-  mds_rank_t m = mds_rank_t(0);
-  for (size_t j = 0; j < strlen(ret); j++) {
-    nchars++;
-    if (ret[j] == ' ' || ret[j] == '\n') {
-      char val[LINE_MAX] = "";
-      strncpy(val, start, nchars);
-      my_targets[m] = atof(val);
-      start += nchars;
-      nchars = 0;
-      m++;
-    }
-  }
-  dout(2) << " done executing, ret=" << ret << " made targets=" << my_targets << dendl; 
+  std::istringstream targets(lua_tostring(L, lua_gettop(L)));
+  string target;
+  for (mds_rank_t m = mds_rank_t(0); 
+       std::getline(targets, target, ' ');
+       m++)
+    my_targets[m] = atof(target.c_str());
+  dout(2) << " done executing, made targets=" << my_targets << dendl; 
+
   try_rebalance();
 }
 
 
 
-string MDBalancer::format_policy(string s) {
+void MDBalancer::dump_balancer(string script)
+{
+  std::istringstream script_stream(script);
+  string line; 
+  for (int i = 0; std::getline(script_stream, line); i++)
+    dout(10) << i << ". " << line << dendl;
+}
+
+
+
+string MDBalancer::format_policy(string s) 
+{
   string ret = s;
   replace(ret.begin(), ret.end(), '_', ' ');
   size_t pos = 0;
@@ -1390,21 +1367,7 @@ void MDBalancer::dirfrag_selector(multimap<double, CDir*> smaller,
     char ret[LINE_MAX];
     if (luaL_dostring(L, script) > 0) {
       dout(0) << " script failed: " << lua_tostring(L, lua_gettop(L)) << dendl;
-      char *start = script;
-      size_t nchars = 0;
-      size_t lines = 1;
-      for (size_t i = 0; i < strlen(script); i++) {
-        nchars++;
-        if (script[i] == '\n') {
-          char line[LINE_MAX] = "";
-          script[i] = ' ';
-          strncpy(line, start, nchars);
-          dout(10) << lines << ". " << line << dendl;
-          start = start + nchars;
-          nchars = 0;
-          lines++;
-        }
-      }
+      dump_balancer(script);
       lua_close(L);
       return;
     } else {

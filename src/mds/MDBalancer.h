@@ -121,8 +121,8 @@ public:
   //Mantle hooks that allow customizable metadata balancers, 
   //specified with Lua and injected with 'ceph tell'
   void custom_balancer();
-  string construct_balancer_script();
   string format_policy(string s);
+  void dump_balancer(string s);
   // Quickly execute many dirfrag selectors and choose the best one
   //  - best quantified using the smallest net distance
   void dirfrag_selector(multimap<double, CDir*>,
