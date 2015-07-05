@@ -779,102 +779,31 @@ void MDBalancer::prep_rebalance(int beat)
 
 void MDBalancer::custom_balancer() 
 {
-  dout(5) << "Preparing transfer to Lua, clearing mytargets=" << my_targets.size()
-          << " imported=" << imported.size() 
-          << " exported=" << exported.size() 
-          << dendl;
+  rebalance_time = ceph_clock_now(g_ceph_context);
+
+  dout(10) << "Preparing transfer to Lua and clearing mytargets=" << my_targets.size()
+           << " imported=" << imported.size() << " exported=" << exported.size() 
+           << dendl;
   my_targets.clear();
   imported.clear();
   exported.clear();
   mds->mdcache->migrator->clear_export_queue();
 
+  // initialize Lua and construct balancer script
   lua_State *L = luaL_newstate();
   luaL_openlibs(L);
   lua_newtable(L);
- 
-  // pull out some important metrics
-  rebalance_time = ceph_clock_now(g_ceph_context);
-  //vector<pair<string, > args;
-  mds_rank_t whoami = mds->get_nodeid();
-  int cluster_size = mds->get_mds_map()->get_num_in_mds();
-  const char *log_file = g_conf->log_file.c_str();
-  double authmetaload = 0;
-  list<CDir*> ls;
-  mds->mdcache->get_root()->get_dirfrags(ls);
-  for (list<CDir*>::iterator p = ls.begin();
-       p != ls.end();
-       p++) {
-    dout(10) << "   - for p=" << **p << "authmetaload=" << authmetaload << dendl;
-    authmetaload += (*p)->pop_auth_subtree_nested.meta_load(rebalance_time, mds->mdcache->decayrate);
-  }
-
-  dout(10) << "pushing args to lua log=" << log_file 
-          << " log=" << log_file
-          << " whoami=" << whoami
-          << " auth_metaload=" << authmetaload
-          << " nfiles=" << nfiles
-          << " all_metaload=" << total_meta_load
-          << dendl;
-  int index = 1;                                // Pushing arguments to Lua: 
-  lua_pushnumber(L, index++);                   // - index of value (e.g., log file)
-  lua_pushstring(L, log_file);                  // - value of log file (e.g., the string)
-  lua_settable(L, -3);                          // - pop 2; t[index] = val
-  lua_pushnumber(L, index++);
-  lua_pushnumber(L, ((int) whoami) + 1);
-  lua_settable(L, -3);
-  lua_pushnumber(L, index++);
-  lua_pushnumber(L, authmetaload);
-  lua_settable(L, -3);
-  lua_pushnumber(L, index++);
-  lua_pushnumber(L, nfiles);
-  lua_settable(L, -3);
-  lua_pushnumber(L, index++);
-  lua_pushnumber(L, total_meta_load);
-  lua_settable(L, -3);
- 
-  // pass per-MDS sextuplets to Lua balancer
-  for (mds_rank_t i=mds_rank_t(0); i < mds_rank_t(cluster_size); i++) {
-    map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
-    std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
-    mds_load_t &load(r.first->second);
-    dout(10) << "mds " << i << " has load < auth all req q cpu mem >:  "
-            << load.auth.meta_load() << " "
-            << load.all.meta_load() << " "
-            << load.req_rate << " "
-            << load.queue_len << " " 
-            << load.cpu_load_avg << " "
-            << "-1"
-            << dendl;
-
-    // The auth/all metadata loads are slightly stale, since they are updated with get_load. 
-    // So we need to scale the metadata_load and target load to be on par with the target_load.
-    lua_pushnumber(L, index++);
-    lua_pushnumber(L, load.auth.meta_load());
-    lua_settable(L, -3);
-    lua_pushnumber(L, index++);     
-    lua_pushnumber(L, load.all.meta_load());
-    lua_settable(L, -3);
-    lua_pushnumber(L, index++);
-    lua_pushnumber(L, load.req_rate);
-    lua_settable(L, -3);
-    lua_pushnumber(L, index++);
-    lua_pushnumber(L, load.queue_len);
-    lua_settable(L, -3);
-    lua_pushnumber(L, index++);
-    lua_pushnumber(L, load.cpu_load_avg);
-    lua_settable(L, -3);
-    lua_pushnumber(L, index++);
-    lua_pushnumber(L, -1);
-    lua_settable(L, -3);
-  }
-  
-  dout(20) << " construct migration script based on user-defined policies" << dendl;
   string script = LUA_IMPORT + g_conf->mds_bal_dir + LUA_INIT +
                   format_policy(g_conf->mds_bal_mdsload) + LUA_LOAD +
                   format_policy(g_conf->mds_bal_when) + LUA_WHEN +
                   format_policy(g_conf->mds_bal_where) + LUA_WHERE;
 
+  // push metrics to Lua
+  vector<pair<int, string> > args = extract_metrics();
+  push_lua_metrics(L, args);
   lua_setglobal(L, "arg");
+
+  // execute script
   if (luaL_dostring(L, script.c_str()) > 0) {
     dout(0) << " script failed: " << lua_tostring(L, lua_gettop(L)) << dendl;
     dump_balancer(script);
@@ -882,6 +811,7 @@ void MDBalancer::custom_balancer()
     return;
   }
 
+  // parse response
   std::istringstream targets(lua_tostring(L, lua_gettop(L)));
   lua_close(L);
   string target;
@@ -892,6 +822,90 @@ void MDBalancer::custom_balancer()
   dout(2) << " done executing, made targets=" << my_targets << dendl; 
 
   try_rebalance();
+}
+
+
+
+vector<pair<int, string> > MDBalancer::extract_metrics() 
+{
+  // pull out some important metrics and push them to lua
+  vector<pair<int, string> > args;
+  stringstream whoami, authmetaload, files, totalmetaload;
+  whoami        << ((int) mds->get_nodeid()) + 1; // current MDS
+  files         << nfiles;                        // # of files in a directory
+  totalmetaload << total_meta_load;               // current metadata load on all subtrees
+  authmetaload  << get_current_authmetaload();    // current metadata load on authority
+  args.push_back(pair<int, string>(LUAARG_STRING, g_conf->log_file));
+  args.push_back(pair<int, string>(LUAARG_NUMBER, whoami.str()));
+  args.push_back(pair<int, string>(LUAARG_NUMBER, authmetaload.str()));
+  args.push_back(pair<int, string>(LUAARG_NUMBER, files.str()));
+  args.push_back(pair<int, string>(LUAARG_NUMBER, totalmetaload.str()));
+
+  // pass per-MDS sextuplets to Lua balancer
+  int cluster_size = mds->get_mds_map()->get_num_in_mds();
+  for (mds_rank_t i=mds_rank_t(0); i < mds_rank_t(cluster_size); i++) {
+    map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
+    std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
+    mds_load_t &load(r.first->second);
+    dout(10) << "mds " << i << " has load < auth all req q cpu mem >:  "
+             << load.auth.meta_load() << " " << load.all.meta_load() << " "
+             << load.req_rate << " "  << load.queue_len << " " 
+             << load.cpu_load_avg << " " << "-1" << dendl;
+
+    // auth/all metadata loads are slightly stale, since they are updated with get_load. 
+    stringstream authmetaload, allmetaload, req_rate, queue_len, cpu_load_avg, mem;
+    authmetaload << load.auth.meta_load();      
+    allmetaload  << load.all.meta_load();      
+    req_rate     << load.req_rate;
+    queue_len    << load.queue_len;
+    cpu_load_avg << load.cpu_load_avg;
+    mem          << "-1";                      // TODO: add memory pressure
+    args.push_back(pair<int, string>(LUAARG_NUMBER, authmetaload.str()));
+    args.push_back(pair<int, string>(LUAARG_NUMBER, allmetaload.str()));
+    args.push_back(pair<int, string>(LUAARG_NUMBER, req_rate.str()));
+    args.push_back(pair<int, string>(LUAARG_NUMBER, queue_len.str()));
+    args.push_back(pair<int, string>(LUAARG_NUMBER, cpu_load_avg.str()));
+    args.push_back(pair<int, string>(LUAARG_NUMBER, mem.str())); 
+  }
+
+  return args;
+}
+
+
+
+void MDBalancer::push_lua_args(lua_State *L, vector<pair<int, string> >& args) 
+{
+  int index = 1;                                
+  for (vector<pair<int, string> >::iterator arg = args.begin();
+       arg != args.end();
+       arg++) {
+    lua_pushnumber(L, index++);                   // - index of value (e.g., log file)
+    if (arg->first == LUAARG_NUMBER) {            // - value of log file (e.g., the string)
+      dout(10) << "pushing number: " << *arg << dendl;
+      lua_pushnumber(L, atof(arg->second.c_str()));
+    }
+    else if (arg->first == LUAARG_STRING) {
+      dout(10) << "pushing string: " << *arg << dendl;
+      lua_pushstring(L, arg->second.c_str());
+    }
+    lua_settable(L, -3);                          // - pop 2; t[index] = val
+  }
+}
+
+
+
+double MDBalancer::get_current_authmetaload() 
+{
+  double total = 0;
+  list<CDir*> ls;
+  mds->mdcache->get_root()->get_dirfrags(ls);
+  for (list<CDir*>::iterator p = ls.begin();
+       p != ls.end();
+       p++) {
+    dout(10) << "   - for p=" << **p << "total=" << total << dendl;
+    total += (*p)->pop_auth_subtree_nested.meta_load(ceph_clock_now(g_ceph_context), mds->mdcache->decayrate);
+  }
+  return total;
 }
 
 

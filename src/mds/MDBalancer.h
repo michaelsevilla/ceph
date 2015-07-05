@@ -16,6 +16,8 @@
 
 #ifndef CEPH_MDBALANCER_H
 #define CEPH_MDBALANCER_H
+#define LUAARG_STRING 1
+#define LUAARG_NUMBER 2
 
 #include <list>
 #include <map>
@@ -38,6 +40,7 @@ extern "C"{
     #include <lua5.2/lauxlib.h>
     #include <lua5.2/lua.h>
 }
+
 
 
 class MDBalancer {
@@ -122,8 +125,11 @@ public:
   //specified with Lua and injected with 'ceph tell'
   void custom_balancer();
   string format_policy(string s);
+  double get_current_authmetaload();
+  vector<pair<int, string> > extract_metrics();
+  void push_lua_args(lua_State *L, vector<pair<int, string> >& args);
   void dump_balancer(string s);
-  // Quickly execute many dirfrag selectors and choose the best one
+  // Quickly execute many dirfrag selectors and  best one
   //  - best quantified using the smallest net distance
   void dirfrag_selector(multimap<double, CDir*>,
                         double amount, 
