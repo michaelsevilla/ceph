@@ -800,7 +800,7 @@ void MDBalancer::custom_balancer()
 
   // push metrics to Lua
   vector<pair<int, string> > args = extract_metrics();
-  push_lua_metrics(L, args);
+  push_lua_args(L, args);
   lua_setglobal(L, "arg");
 
   // execute script
