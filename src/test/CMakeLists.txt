@@ -786,3 +786,985 @@ add_ceph_unittest(unittest_pageset ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/unittest_pa
 
 #make check ends here
 
+if(${WITH_RADOSGW})
+  # test_cors
+  set(test_cors_srcs test_cors.cc)
+  add_executable(test_cors
+    ${test_cors_srcs}
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  target_link_libraries(test_cors
+    librados
+    rgw_a
+    global
+    curl
+    expat
+    ${BLKID_LIBRARIES}
+    ${CMAKE_DL_LIBS} ${ALLOC_LIBS} ${UNITTEST_LIBS})
+  set_target_properties(test_cors PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+
+  # test_rgw_manifest
+  set(test_rgw_manifest_srcs rgw/test_rgw_manifest.cc)
+  add_executable(test_rgw_manifest
+    ${test_rgw_manifest_srcs}
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  target_link_libraries(test_rgw_manifest
+    rgw_a
+    cls_rgw_client
+    cls_lock_client
+    cls_refcount_client
+    cls_log_client
+    cls_statelog_client
+    cls_timeindex_client
+    cls_version_client
+    cls_replica_log_client
+    cls_kvs
+    cls_user_client
+    librados
+    global
+    curl
+    expat
+    ${BLKID_LIBRARIES}
+    ${CMAKE_DL_LIBS}
+    ${ALLOC_LIBS}
+    ${UNITTEST_LIBS}
+    ${CRYPTO_LIBS}
+    )
+  set_target_properties(test_rgw_manifest PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+
+  # test_rgw_obj
+  set(test_rgw_obj_srcs rgw/test_rgw_obj.cc)
+  add_executable(test_rgw_obj
+    ${test_rgw_obj_srcs}
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  target_link_libraries(test_rgw_obj
+    rgw_a
+    cls_rgw_client
+    cls_lock_client
+    cls_refcount_client
+    cls_log_client
+    cls_statelog_client
+    cls_version_client
+    cls_replica_log_client
+    cls_kvs
+    cls_user_client
+    librados
+    global
+    curl
+    uuid
+    expat
+    ${CMAKE_DL_LIBS}
+    ${ALLOC_LIBS}
+    ${UNITTEST_LIBS}
+    ${CRYPTO_LIBS}
+    )
+  set_target_properties(test_rgw_obj PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+
+  # test_cls_rgw_meta
+  set(test_cls_rgw_meta_srcs test_rgw_admin_meta.cc)
+  add_executable(test_cls_rgw_meta
+    ${test_cls_rgw_meta_srcs}
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  target_link_libraries(test_cls_rgw_meta
+    librados
+    rgw_a
+    global
+    curl
+    expat
+    cls_version_client
+    cls_log_client
+    cls_statelog_client
+    cls_refcount_client
+    cls_rgw_client
+    cls_user_client
+    cls_lock_client
+    ${Boost_REGEX_LIBRARY}
+    ${BLKID_LIBRARIES}
+    ${CMAKE_DL_LIBS} ${ALLOC_LIBS} ${UNITTEST_LIBS} ${CRYPTO_LIBS})
+  set_target_properties(test_cls_rgw_meta PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+
+  # test_cls_rgw_log
+  set(test_cls_rgw_log_srcs
+    test_rgw_admin_log.cc
+    )
+  add_executable(test_cls_rgw_log
+    ${test_cls_rgw_log_srcs}
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  target_link_libraries(test_cls_rgw_log
+    librados
+    rgw_a
+    global
+    curl
+    expat
+    cls_version_client
+    cls_log_client
+    cls_statelog_client
+    cls_refcount_client
+    cls_rgw_client
+    cls_user_client
+    cls_lock_client
+    ${Boost_REGEX_LIBRARY}
+    ${BLKID_LIBRARIES}
+    ${CMAKE_DL_LIBS}
+    ${ALLOC_LIBS}
+    ${UNITTEST_LIBS}
+    ${EXTRALIBS}
+    ${CRYPTO_LIBS}
+    )
+  set_target_properties(test_cls_rgw_log PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+
+  # test_cls_rgw_opstate
+  set(test_cls_rgw_opstate_srcs test_rgw_admin_opstate.cc)
+  add_executable(test_cls_rgw_opstate
+    ${test_cls_rgw_opstate_srcs}
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  target_link_libraries(test_cls_rgw_opstate
+    rgw_a
+    librados
+    cls_version_client
+    cls_log_client
+    cls_statelog_client
+    cls_timeindex_client
+    cls_refcount_client
+    cls_rgw_client
+    cls_user_client
+    cls_lock_client
+    global
+    curl
+    expat
+    ${BLKID_LIBRARIES}
+    ${CMAKE_DL_LIBS}
+    ${ALLOC_LIBS}
+    ${UNITTEST_LIBS}
+    ${CRYPTO_LIBS}
+    ${EXTRALIBS}
+    )
+  set_target_properties(test_cls_rgw_opstate PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+endif(${WITH_RADOSGW})
+
+# radostest 
+set(libradostest_srcs librados/test.cc librados/TestCase.cc)
+add_library(radostest STATIC ${libradostest_srcs})
+set_target_properties(radostest PROPERTIES COMPILE_FLAGS ${UNITTEST_CXX_FLAGS})
+
+# multi_stress_watch
+add_executable(multi_stress_watch
+  multi_stress_watch.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(multi_stress_watch librados global radostest
+  ${BLKID_LIBRARIES} ${CMAKE_DL_LIBS} ${ALLOC_LIBS})
+
+set(librados_test_stub_srcs
+  librados_test_stub/LibradosTestStub.cc
+  librados_test_stub/TestClassHandler.cc
+  librados_test_stub/TestIoCtxImpl.cc
+  librados_test_stub/TestMemIoCtxImpl.cc
+  librados_test_stub/TestMemRadosClient.cc
+  librados_test_stub/TestRadosClient.cc)
+add_library(librados_test_stub STATIC ${librados_test_stub_srcs})
+  
+# unittest_librbd
+add_executable(unittest_librbd EXCLUDE_FROM_ALL
+  librbd/test_librbd.cc
+  librbd/test_fixture.cc
+  librbd/test_ImageWatcher.cc
+  librbd/test_internal.cc
+  librbd/test_support.cc
+  librbd/test_main.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  ${CMAKE_SOURCE_DIR}/src/common/TextTable.cc
+  ${CMAKE_SOURCE_DIR}/src/common/secret.c
+  )
+add_dependencies(check unittest_librbd)
+set_target_properties(unittest_librbd PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+if(${WITH_LTTNG})
+  target_link_libraries(unittest_librbd librbd_tp)
+endif(${WITH_LTTNG})
+target_link_libraries(unittest_librbd
+  librbd
+  librados
+  journal
+  cls_journal_client
+  librados_api
+  librados_test_stub
+  ${UNITTEST_LIBS}
+  global
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  blkid
+  udev
+  keyutils
+  radostest
+  )
+
+add_executable(test_librbd_fsx
+  librbd/fsx.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  ${CMAKE_SOURCE_DIR}/src/common/TextTable.cc
+  ${CMAKE_SOURCE_DIR}/src/common/secret.c
+  )
+target_link_libraries(test_librbd_fsx
+  librbd
+  librados
+  global
+  m
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  blkid
+  udev
+  keyutils
+  )
+
+add_executable(test_cls_rbd
+  cls_rbd/test_cls_rbd.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  ${CMAKE_SOURCE_DIR}/src/common/TextTable.cc
+  ${CMAKE_SOURCE_DIR}/src/common/secret.c
+  )
+set_target_properties(test_cls_rbd PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_rbd
+  librbd
+  cls_rbd
+  cls_lock
+  librados
+  global
+  ${UNITTEST_LIBS}
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  radostest
+  blkid
+  udev
+  keyutils
+  )
+
+add_executable(test_cls_refcount
+  cls_refcount/test_cls_refcount.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_cls_refcount PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_refcount
+  librados
+  cls_refcount_client
+  global
+  ${UNITTEST_LIBS}
+  ${BLKID_LIBRARIES}
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  radostest
+  )
+
+add_executable(test_cls_version
+  cls_version/test_cls_version.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_cls_version PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_version
+  librados
+  cls_version_client
+  global
+  ${UNITTEST_LIBS}
+  ${BLKID_LIBRARIES}
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  radostest
+  )
+
+add_executable(test_cls_log
+  cls_log/test_cls_log.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_cls_log PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_log
+  librados
+  cls_log_client
+  global
+  radostest
+  ${UNITTEST_LIBS}
+  ${BLKID_LIBRARIES}
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  )
+
+add_executable(test_cls_statelog
+  cls_statelog/test_cls_statelog.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_cls_statelog PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_statelog
+  librados
+  cls_statelog_client
+  global
+  ${UNITTEST_LIBS}
+  ${BLKID_LIBRARIES}
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  radostest
+  )
+
+add_executable(test_cls_replica_log
+  cls_replica_log/test_cls_replica_log.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_cls_replica_log PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_replica_log
+  librados
+  cls_replica_log_client
+  global
+  ${UNITTEST_LIBS}
+  ${BLKID_LIBRARIES}
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  radostest
+  )
+
+add_executable(test_cls_lock
+  cls_lock/test_cls_lock.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_cls_lock PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_lock
+  cls_lock
+  librados
+  global
+  ${UNITTEST_LIBS}
+  ${BLKID_LIBRARIES}
+  ${CMAKE_DL_LIBS}
+  ${ALLOC_LIBS}
+  ${CRYPTO_LIBS}
+  ${EXTRALIBS}
+  radostest
+  )
+
+add_executable(test_cls_hello
+  cls_hello/test_cls_hello.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_cls_hello PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_hello
+  librados
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  radostest
+  ${UNITTEST_LIBS}
+  )
+
+add_executable(test_cls_numops cls_numops/test_cls_numops.cc)
+set_target_properties(test_cls_numops PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_numops 
+  librados 
+  global
+  cls_numops_client 
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  radostest
+  ${UNITTEST_LIBS} 
+  )
+
+if(${WITH_RADOSGW})
+  add_executable(test_cls_rgw
+    cls_rgw/test_cls_rgw.cc
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  set_target_properties(test_cls_rgw PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+  target_link_libraries(test_cls_rgw
+    cls_rgw_client
+    librados
+    global
+    ${UNITTEST_LIBS}
+    ${EXTRALIBS}
+    ${BLKID_LIBRARIES}
+    ${ALLOC_LIBS}
+    ${CMAKE_DL_LIBS}
+    radostest)
+endif(${WITH_RADOSGW})
+
+add_executable(test_cls_lua
+    cls_lua/test_cls_lua.cc
+)
+set_target_properties(test_cls_lua PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_cls_lua
+    liblua
+    cls_lua_client
+    librados
+    ${UNITTEST_LIBS}
+    ${EXTRALIBS}
+    ${ALLOC_LIBS}
+    ${CMAKE_DL_LIBS}
+    radostest
+)
+
+# test_async_driver
+add_executable(test_async_driver
+  msgr/test_async_driver.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_async_driver PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_async_driver os global ${BLKID_LIBRARIES} ${CMAKE_DL_LIBS} ${ALLOC_LIBS} ${UNITTEST_LIBS})
+
+# test_msgr
+add_executable(test_msgr
+  msgr/test_msgr.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_msgr PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_msgr os global ${BLKID_LIBRARIES} ${CMAKE_DL_LIBS} ${ALLOC_LIBS} ${UNITTEST_LIBS})
+
+#test_mon_msg
+add_executable(test_mon_msg mon/test-mon-msg.cc)
+set_target_properties(test_mon_msg PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_mon_msg os osdc global ${UNITTEST_LIBS})
+
+#test_perf_local
+add_executable(test_perf_local 
+  perf_local.cc
+  perf_helper.cc)
+#INTEL_SSE & INTEL_SSE2 flags
+set(PERF_LOCAL_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2") 
+set_target_properties(test_perf_local PROPERTIES COMPILE_FLAGS
+  ${PERF_LOCAL_FLAGS})
+target_link_libraries(test_perf_local os global ${UNITTEST_LIBS})
+
+#test_perf_objectstore
+add_executable(test_perf_objectstore objectstore/ObjectStoreTransactionBenchmark.cc)
+set_target_properties(test_perf_objectstore PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_perf_objectstore os osdc global ${UNITTEST_LIBS})
+
+#test_perf_msgr_server
+add_executable(test_perf_msgr_server msgr/perf_msgr_server.cc)
+set_target_properties(test_perf_msgr_server PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_perf_msgr_server os global ${UNITTEST_LIBS})
+
+#test_perf_msgr_client
+add_executable(test_perf_msgr_client msgr/perf_msgr_client.cc)
+set_target_properties(test_perf_msgr_client PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_perf_msgr_client os global ${UNITTEST_LIBS})
+
+add_executable(test_mon_workloadgen
+  mon/test_mon_workloadgen.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(test_mon_workloadgen
+  os
+  osdc
+  global
+  ${EXTRALIBS}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_rados_api_cmd
+  librados/cmd.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_cmd PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_cmd
+  librados global ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_io
+  librados/io.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_io PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_io
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_c_write_operations
+  librados/c_write_operations.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_c_write_operations PROPERTIES
+  COMPILE_FLAGS ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_c_write_operations
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_c_read_operations
+  librados/c_read_operations.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_c_read_operations PROPERTIES COMPILE_FLAGS 
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_c_read_operations
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_aio
+  librados/aio.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_aio PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_aio
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_list
+  librados/list.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_list PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_list
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_nlist
+  librados/nlist.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_nlist PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_nlist
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_pool
+  librados/pool.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_pool PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS}
+  )
+target_link_libraries(test_rados_api_pool
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_stat
+  librados/stat.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_stat PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_stat
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_watch_notify
+  librados/watch_notify.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_watch_notify PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_watch_notify
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_cls
+  librados/cls.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_cls PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_cls
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_misc
+  librados/misc.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_misc PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_misc
+  librados global ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_lock
+  librados/lock.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_lock PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_lock
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_executable(test_rados_api_tier
+  librados/tier.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_tier PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_tier
+  global librados ${UNITTEST_LIBS} ${ALLOC_LIBS} ${Boost_SYSTEM_LIBRARY} radostest)
+
+add_executable(test_rados_api_snapshots
+  librados/snapshots.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_rados_api_snapshots PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_rados_api_snapshots
+  librados ${UNITTEST_LIBS} ${ALLOC_LIBS} radostest)
+
+add_library(rados_striper_test STATIC libradosstriper/TestCase.cc)
+target_link_libraries(rados_striper_test radostest)
+set_target_properties(rados_striper_test PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+
+add_executable(test_rados_api_striping
+  libradosstriper/striping.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(test_rados_api_striping librados libradosstriper 
+  ${UNITTEST_LIBS} ${ALLOC_LIBS} rados_striper_test)
+set_target_properties(test_rados_api_striping PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+
+if(${WITH_CEPHFS})
+  add_executable(test_libcephfs
+    libcephfs/test.cc
+    libcephfs/readdir_r_cb.cc
+    libcephfs/caps.cc
+    libcephfs/multiclient.cc
+    libcephfs/flock.cc
+    libcephfs/acl.cc
+    libcephfs/access.cc
+    $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+  set_target_properties(test_libcephfs PROPERTIES COMPILE_FLAGS
+    ${UNITTEST_CXX_FLAGS})
+  target_link_libraries(test_libcephfs
+    cephfs
+    librados
+    ${UNITTEST_LIBS}
+    ${EXTRALIBS}
+    ${ALLOC_LIBS}
+    ${CMAKE_DL_LIBS}
+    )
+endif(${WITH_CEPHFS})  
+
+add_executable(test_objectstore
+  objectstore/store_test.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_objectstore PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_objectstore
+  os
+  common
+  ${UNITTEST_LIBS}
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_keyvaluedb
+  objectstore/test_kv.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_keyvaluedb PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_keyvaluedb
+  os
+  common
+  ${UNITTEST_LIBS}
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_objectstore_workloadgen
+  objectstore/workload_generator.cc
+  objectstore/TestObjectStoreState.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(test_objectstore_workloadgen
+  os
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+#test_filestore
+add_executable(test_filestore filestore/TestFileStore.cc)
+set_target_properties(test_filestore PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_filestore os global ${UNITTEST_LIBS})
+
+add_executable(test_filestore_idempotent
+  objectstore/test_idempotent.cc
+  objectstore/FileStoreTracker.cc
+  common/ObjectContents.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(test_filestore_idempotent
+  os
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_filestore_idempotent_sequence
+  objectstore/test_idempotent_sequence.cc
+  objectstore/DeterministicOpSequence.cc
+  objectstore/TestObjectStoreState.cc
+  objectstore/FileStoreDiff.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(test_filestore_idempotent_sequence
+  os
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_xattr_bench
+  xattr_bench.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_xattr_bench PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_xattr_bench
+  os
+  common
+  ${UNITTEST_LIBS}
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_filejournal
+  test_filejournal.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_filejournal PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_filejournal
+  os
+  common
+  ${UNITTEST_LIBS}
+  global
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  ${EXTRALIBS}
+  )
+
+add_executable(test_stress_watch
+  test_stress_watch.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_stress_watch PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_stress_watch
+  librados
+  global
+  ${UNITTEST_LIBS}
+  radostest
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_objectcacher_stress
+  osdc/object_cacher_stress.cc
+  osdc/FakeWriteback.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(test_objectcacher_stress
+  osdc
+  global
+  ${EXTRALIBS}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_object_map
+  ObjectMap/test_object_map.cc
+  ObjectMap/KeyValueDBMemory.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_object_map PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_object_map
+  os
+  common
+  ${UNITTEST_LIBS}
+  global
+  ${EXTRALIBS}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_keyvaluedb_atomicity
+  ObjectMap/test_keyvaluedb_atomicity.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_keyvaluedb_atomicity PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_keyvaluedb_atomicity
+  os
+  common
+  ${UNITTEST_LIBS}
+  global
+  ${EXTRALIBS}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(test_keyvaluedb_iterators
+  ObjectMap/test_keyvaluedb_iterators.cc
+  ObjectMap/KeyValueDBMemory.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+set_target_properties(test_keyvaluedb_iterators PROPERTIES COMPILE_FLAGS
+  ${UNITTEST_CXX_FLAGS})
+target_link_libraries(test_keyvaluedb_iterators
+  os
+  common
+  ${UNITTEST_LIBS}
+  global
+  ${EXTRALIBS}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+if(${HAVE_FUSE})
+  add_executable(test_cfuse_cache_invalidate
+    test_cfuse_cache_invalidate.cc
+    )
+  target_link_libraries(test_cfuse_cache_invalidate
+    global
+    os
+    ${EXTRALIBS}
+    ${ALLOC_LIBS}
+    ${CMAKE_DL_LIBS}
+    )
+endif(${HAVE_FUSE})
+
+if(${WITH_CEPHFS})
+  add_executable(test_c_headers
+    test_c_headers.c
+    $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+  target_link_libraries(test_c_headers
+    librados
+    cephfs
+    ${EXTRALIBS}
+    ${BLKID_LIBRARIES}
+    ${ALLOC_LIBS}
+    ${CMAKE_DL_LIBS}
+    )
+endif(${WITH_CEPHFS})
+
+add_executable(test_get_blkdev_size
+  test_get_blkdev_size.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(test_get_blkdev_size
+  common
+  pthread
+  ${EXTRALIBS}
+  ${BLKID_LIBRARIES}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(simple_server
+  messenger/simple_server.cc
+  messenger/simple_dispatcher.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(simple_server
+  os global common ${Boost_REGEX_LIBRARY}
+  ${EXTRALIBS}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+add_executable(simple_client
+  messenger/simple_client.cc
+  messenger/simple_dispatcher.cc
+  $<TARGET_OBJECTS:heap_profiler_objs>
+  )
+target_link_libraries(simple_client
+  os global common ${Boost_REGEX_LIBRARY}
+  ${EXTRALIBS}
+  ${ALLOC_LIBS}
+  ${CMAKE_DL_LIBS}
+  )
+
+if(HAVE_XIO)
+  add_executable(xio_server
+    messenger/xio_server.cc
+    messenger/xio_dispatcher.cc
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  target_link_libraries(xio_server
+    os global common ${Boost_REGEX_LIBRARY}
+    ${Xio_LIBRARY} ibverbs rdmacm pthread rt
+    ${EXTRALIBS}
+    ${ALLOC_LIBS}
+    ${CMAKE_DL_LIBS}
+    )
+
+  add_executable(xio_client
+    messenger/xio_client.cc
+    messenger/xio_dispatcher.cc
+    $<TARGET_OBJECTS:heap_profiler_objs>
+    )
+  target_link_libraries(xio_client
+    os global common ${Boost_REGEX_LIBRARY}
+    ${Xio_LIBRARY} ibverbs rdmacm pthread rt
+    ${EXTRALIBS}
+    ${ALLOC_LIBS}
+    ${CMAKE_DL_LIBS}
+    )
+endif(HAVE_XIO)
