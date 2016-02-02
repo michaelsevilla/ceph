@@ -37,6 +37,7 @@ using std::map;
 using std::vector;
 
 #include "common/config.h"
+#include "common/errno.h"
 
 #define dout_subsys ceph_subsys_mds_balancer
 #undef DOUT_COND
@@ -166,6 +167,27 @@ mds_load_t MDBalancer::get_load(utime_t now)
 
   dout(15) << "get_load " << load << dendl;
   return load;
+}
+
+void MDBalancer::localize_balancer(string const balancer)
+{
+  int64_t pool_id = mds->mdsmap->get_metadata_pool();
+  string fname = "/tmp/" + balancer;
+
+  dout(15) << "looking for balancer=" << balancer << " in RADOS pool_id=" << pool_id << dendl;
+  object_t oid = object_t(balancer);
+  object_locator_t oloc(pool_id);
+  bufferlist data;
+  C_SaferCond waiter;
+  mds->objecter->read(oid, oloc, 0, 0, CEPH_NOSNAP, &data, 0, &waiter);
+  int r = waiter.wait();
+  if (r == 0) {
+    dout(15) << "write data from RADOS into fname=" << fname << " data=" << data.c_str() << dendl;
+    data.write_file(fname.c_str());
+  } else {
+    dout(0) << "tick could not find balancer " << balancer
+            << " in RADOS: " << cpp_strerror(r) << dendl;
+  }
 }
 
 void MDBalancer::send_heartbeat()
@@ -599,8 +621,14 @@ void MDBalancer::prep_rebalance(int beat)
 
 int MDBalancer::mantle_prep_rebalance()
 {
-  /* hard-code lua balancer */
-  string script = "BAL_LOG(0, \"I am mds \"..whoami)\n return {11, 12, 3}";
+  /* pull metadata balancer from RADOS */
+  string const balancer = mds->mdsmap->get_balancer();
+  localize_balancer(balancer);
+  ifstream f("/tmp/" + balancer);
+  if (!f.is_open())
+    return -ENOENT;
+  string script((istreambuf_iterator<char>(f)),
+                 istreambuf_iterator<char>());
 
   /* prepare for balancing */
   int cluster_size = mds->get_mds_map()->get_num_in_mds();
