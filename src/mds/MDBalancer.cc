@@ -26,6 +26,7 @@
 #include "Migrator.h"
 
 #include "include/Context.h"
+#include "common/errno.h"
 #include "msg/Messenger.h"
 #include "messages/MHeartbeat.h"
 #include "messages/MMDSLoadTargets.h"
@@ -87,16 +88,21 @@ void MDBalancer::tick()
     dout(15) << "tick last_sample now " << now << dendl;
     last_sample = now;
   }
+  
+  // first, try to pull metadata balancer from RADOS and store locally
+  string const balancer = "bal_greedyspill";
+  localize_balancer(balancer);
 
   string metrics = "0 "
                    "0.11 0.22 0.33 0.44 0.55 0.66 "
                    "1.11 1.22 1.33 1.44 1.55 1.66 "
                    "2.11 2.22 2.33 2.44 2.55 2.66 ";
 
+  // try to dynamically open the balancer interface
   ClassHandler *class_handler = new ClassHandler(g_ceph_context);
   cls_initialize(class_handler);
   ClassHandler::ClassData *bal = NULL;
-  if (!class_handler->open_class("bal_greedyspill", &bal)) {
+  if (!class_handler->open_class(balancer, &bal)) {
     ClassHandler::ClassMethod *method = bal->get_method("rebalance");
     if (method) {
       bufferlist indata, outdata;
@@ -143,6 +149,8 @@ public:
     mds->balancer->send_heartbeat();
   }
 };
+
+
 
 
 double mds_load_t::mds_load()
@@ -192,6 +200,33 @@ mds_load_t MDBalancer::get_load(utime_t now)
 
   dout(15) << "get_load " << load << dendl;
   return load;
+}
+
+void MDBalancer::localize_balancer(string const balancer)
+{
+  int64_t pool_id = mds->mdsmap->get_metadata_pool();
+  string objname, fname;
+  objname.append("cls_");
+  objname.append(balancer);
+  objname.append(".lua");
+  fname.append(g_conf->osd_lua_class_dir);
+  fname.append("/");
+  fname.append(objname);
+
+  dout(15) << "looking for objname=" << objname << " in RADOS pool_id=" << pool_id << dendl;
+  object_t oid = object_t(objname);
+  object_locator_t oloc(pool_id);
+  bufferlist data;
+  C_SaferCond waiter;
+  mds->objecter->read(oid, oloc, 0, 0, CEPH_NOSNAP, &data, 0, &waiter);
+  int r = waiter.wait();
+  if (r == 0) {
+    dout(15) << "write data from RADOS into fname=" << fname << " data=" << data.c_str() << dendl;
+    data.write_file(fname.c_str());
+  } else {
+    dout(0) << "tick could not find objname " << objname 
+            << " in RADOS: " << cpp_strerror(r) << dendl;
+  }
 }
 
 void MDBalancer::send_heartbeat()
