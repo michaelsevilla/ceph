@@ -151,6 +151,14 @@ Eventually load moves around:
 Implementation Details
 ----------------------
 
+Most of the implementation is in MDBalancer. Metrics are passed to the balancer
+policies via the Lua stack and a list of loads is returned back to MDBalancer.
+It sits alongside the current balancer implementation and it's enabled with a
+Ceph CLI command ("ceph mds set balancer mybalancer.lua"). If the Lua policy
+fails (for whatever reason), we fall back to the original metadata load
+balancer. The balancer is stored in the RADOS metadata pool and a string in the
+MDSMap tells the MDSs which balancer to use.
+
 Exposing Metrics to Lua
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -172,6 +180,10 @@ this approach is that the person programming Lua balancer policies has to look
 at the Ceph source code to see which metrics are exposed. We figure that the
 Mantle developer will be in touch with MDS internals anyways.
 
+The metrics exposed to the Lua policy are the same ones that are already stored
+in mds_load_t: auth.meta_load(), all.meta_load(), req_rate, queue_length,
+cpu_load_avg.
+
 Compile/Execute the Balancer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -188,9 +200,10 @@ Returning Policy Decision to C++
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We force the Lua policy engine to return a table of values, corresponding to
-the amount of load to send to each MDS. We do not allow the MDS to return a
-table of MDSs and metrics because we want the decision to be completely made on
-the Lua side.
+the amount of load to send to each MDS. These loads are inserted directly into
+the MDBalancer "my_targets" vector. We do not allow the MDS to return a table
+of MDSs and metrics because we want the decision to be completely made on the
+Lua side.
 
 Iterating through tables returned by Lua is done through the stack. In Lua
 jargon: a dummy value is pushed onto the stack and the next iterator replaces
@@ -211,3 +224,9 @@ the cls logging interface:
 It is implemented by passing a function that wraps the `dout` logging framework
 (`dout_wrapper`) to Lua with the `lua_register()` primitive. The Lua code is
 actually calling the `dout` function in C++.
+
+Testing
+~~~~~~~
+
+Testing is done with the ceph-qa-suite (tasks.cephfs.test_mantle). We do not
+test invalid balancer logging and loading the actual Lua VM.
