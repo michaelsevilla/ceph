@@ -88,6 +88,7 @@ public:
 
   int proc_message(Message *m);
   
+  void localize_balancer(string const balancer);
   void send_heartbeat();
   void handle_heartbeat(MHeartbeat *m);
 

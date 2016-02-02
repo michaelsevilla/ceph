@@ -37,6 +37,7 @@ using std::map;
 using std::vector;
 
 #include "common/config.h"
+#include "common/errno.h"
 
 #define dout_subsys ceph_subsys_mds_balancer
 #undef DOUT_COND
@@ -82,7 +83,7 @@ void MDBalancer::tick()
     dout(15) << "tick last_sample now " << now << dendl;
     last_sample = now;
   }
-
+  
   // balance?
   if (last_heartbeat == utime_t())
     last_heartbeat = now;
@@ -117,6 +118,8 @@ public:
     mds->balancer->send_heartbeat();
   }
 };
+
+
 
 
 double mds_load_t::mds_load()
@@ -166,6 +169,28 @@ mds_load_t MDBalancer::get_load(utime_t now)
 
   dout(15) << "get_load " << load << dendl;
   return load;
+}
+
+void MDBalancer::localize_balancer(string const balancer)
+{
+  int64_t pool_id = mds->mdsmap->get_metadata_pool();
+  string objname = "balancer.lua";
+  string fname = "/tmp/balancer.lua";
+
+  dout(15) << "looking for objname=" << objname << " in RADOS pool_id=" << pool_id << dendl;
+  object_t oid = object_t(objname);
+  object_locator_t oloc(pool_id);
+  bufferlist data;
+  C_SaferCond waiter;
+  mds->objecter->read(oid, oloc, 0, 0, CEPH_NOSNAP, &data, 0, &waiter);
+  int r = waiter.wait();
+  if (r == 0) {
+    dout(15) << "write data from RADOS into fname=" << fname << " data=" << data.c_str() << dendl;
+    data.write_file(fname.c_str());
+  } else {
+    dout(0) << "tick could not find objname " << objname
+            << " in RADOS: " << cpp_strerror(r) << dendl;
+  }
 }
 
 void MDBalancer::send_heartbeat()
@@ -618,8 +643,15 @@ int MDBalancer::mantle_prep_rebalance()
     metrics[i].insert(make_pair("cpu_load_avg", load.cpu_load_avg));
   }
 
-  /* hard-code lua balancer */
-  string script = "BAL_LOG(0, \"I am mds \"..whoami)\n return {11, 12, 3}";
+  /* pull metadata balancer from RADOS */
+  string const balancer = "balancer.lua";
+  localize_balancer(balancer);
+  ifstream f("/tmp/balancer.lua");
+  if (!f.is_open())
+    return -ENOENT;
+  string script((istreambuf_iterator<char>(f)),
+                 istreambuf_iterator<char>());
+
   Mantle *mantle = new Mantle();
   int ret = mantle->balance(script, mds->get_nodeid(), metrics, my_targets);
   delete mantle;
