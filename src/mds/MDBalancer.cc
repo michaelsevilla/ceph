@@ -24,6 +24,7 @@
 #include "Migrator.h"
 
 #include "include/Context.h"
+#include "common/errno.h"
 #include "msg/Messenger.h"
 #include "messages/MHeartbeat.h"
 #include "messages/MMDSLoadTargets.h"
@@ -83,6 +84,28 @@ void MDBalancer::tick()
     dout(15) << "tick last_sample now " << now << dendl;
     last_sample = now;
   }
+  
+  // DO this here because we can't do in the OSD ClassHandler -- since it uses a different objecter
+  // get the script from RADOS
+  std::string const balancer = "hellolua.lua";
+  //std::string const balancer = "greedyspill.lua";
+  int64_t pool_id = mds->mdsmap->get_metadata_pool();
+  object_t oid = object_t(balancer);
+  object_locator_t oloc(pool_id);
+  bufferlist data;
+  C_SaferCond waiter;
+  dout(0) << "Looking for balancer=" << balancer << " in pool_id=" << pool_id << dendl;
+  mds->objecter->read(oid, oloc, 0, 0, CEPH_NOSNAP, &data, 0, &waiter);
+  int r = waiter.wait();
+  if (r == 0) {
+    dout(0) << "Found some data" << data.c_str() << dendl;
+    // set the script in the clsluadata before kicking off throguh the handler
+    
+  } else {
+    dout(0) << "Failure: " << cpp_strerror(r) << dendl;
+  }
+ 
+
 
   // balance?
   if (last_heartbeat == utime_t())
