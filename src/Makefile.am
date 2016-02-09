@@ -59,6 +59,7 @@ include librbd/Makefile.am
 include rgw/Makefile.am
 include lua/Makefile.am
 include cls/Makefile.am
+include mds/mantle/Makefile.am
 include key_value_store/Makefile.am
 include rbd_replay/Makefile.am
 include test/Makefile.am

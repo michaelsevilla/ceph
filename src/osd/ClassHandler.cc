@@ -147,8 +147,13 @@ int ClassHandler::_load_lua_class(ClassData *cls)
 
   /*
    * Mark 'lua' as a class dependency.
+   * - if it's a metadata balancer, load that shared lib instead
    */
-  ClassData *cls_dep = _get_class("lua");
+  ClassData *cls_dep;
+  if (cls->name.find("bal_") != string::npos)
+    cls_dep = _get_class("bal_lua");
+  else
+    cls_dep = _get_class("lua");
   cls->dependencies.insert(cls_dep);
   if (cls_dep->status != ClassData::CLASS_OPEN)
     cls->missing_dependencies.insert(cls_dep);
@@ -235,9 +240,14 @@ int ClassHandler::_load_class(ClassData *cls)
    * method.
    */
   if (cls->lua_handler) {
-    ClassHandler::ClassData *lua_cls = _get_class("lua");
-    assert(lua_cls && lua_cls->name == "lua" &&
-        lua_cls->status == ClassData::CLASS_OPEN);
+    ClassHandler::ClassData *lua_cls;
+    if (cls->name.find("bal_") != string::npos) 
+      lua_cls = _get_class("bal_lua");
+    else
+      lua_cls = _get_class("lua");
+    assert(lua_cls);
+    assert(lua_cls->name == "lua" || lua_cls->name == "bal_lua");
+    assert(lua_cls->status == ClassData::CLASS_OPEN);
 
     ClassHandler::ClassMethod *lua_method;
     lua_method = lua_cls->_get_method("eval_bufferlist");

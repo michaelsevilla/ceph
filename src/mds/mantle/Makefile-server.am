@@ -1,0 +1,13 @@
+## Metadata balancer classes
+
+if WITH_MDS
+libcls_bal_lua_la_SOURCES = \
+    mds/mantle/bal/lua/bal_lua.cc \
+    lua_core/lua_core.cc \
+    lua_core/lua_bufferlist.cc
+libcls_bal_lua_la_CPPFLAGS = $(LIBLUA_CPPFLAGS) $(AM_CPPFLAGS)
+libcls_bal_lua_la_LIBADD = $(LIBLUA)
+libcls_bal_lua_la_LDFLAGS = ${AM_LDFLAGS} -module -avoid-version -shared -export-symbols-regex '.*__cls_.*'
+radoslib_LTLIBRARIES += libcls_bal_lua.la
+
+endif # WITH_MDS

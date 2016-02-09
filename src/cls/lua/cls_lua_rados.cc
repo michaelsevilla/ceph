@@ -392,7 +392,7 @@ void __cls_init()
   functions.push_back({"current_subop_version", clslua_current_subop_version});
 
   /* 
-   * Lua files with helper functions to add to the environment
+   * Lua files to add to the environment
    */
   list<string> env;
 

@@ -50,7 +50,8 @@ noinst_HEADERS += \
 	mds/mds_table_types.h \
 	mds/mdstypes.h \
 	mds/snap.h \
-	mds/MDSContinuation.h
+	mds/MDSContinuation.h \
+	mds/mantle/balclass/balclass.h
 
 noinst_HEADERS += \
 	mds/events/ECommitted.h \
