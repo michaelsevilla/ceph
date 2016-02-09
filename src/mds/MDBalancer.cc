@@ -17,6 +17,8 @@
 #include "MDBalancer.h"
 #include "MDSRank.h"
 #include "mon/MonClient.h"
+#include "osd/ClassHandler.h"
+#include "mds/mantle/balclass/balclass.h"
 #include "MDSMap.h"
 #include "CInode.h"
 #include "CDir.h"
@@ -36,6 +38,7 @@ using std::map;
 using std::vector;
 
 #include "common/config.h"
+#include "common/errno.h"
 
 #define dout_subsys ceph_subsys_mds
 #undef DOUT_COND
@@ -47,6 +50,7 @@ using std::vector;
 #define MIN_REEXPORT 5  // will automatically reexport
 #define MIN_OFFLOAD 10   // point at which i stop trying, close enough
 
+void cls_initialize(ClassHandler *ch);
 
 /* This function DOES put the passed message before returning */
 int MDBalancer::proc_message(Message *m)
@@ -82,6 +86,27 @@ void MDBalancer::tick()
   if ((double)now - (double)last_sample > g_conf->mds_bal_sample_interval) {
     dout(15) << "tick last_sample now " << now << dendl;
     last_sample = now;
+  }
+
+  string metrics = "0 "
+                   "0.11 0.22 0.33 0.44 0.55 0.66 "
+                   "1.11 1.22 1.33 1.44 1.55 1.66 "
+                   "2.11 2.22 2.33 2.44 2.55 2.66 ";
+
+  ClassHandler *class_handler = new ClassHandler(g_ceph_context);
+  cls_initialize(class_handler);
+  ClassHandler::ClassData *bal = NULL;
+  if (!class_handler->open_class("bal_greedyspill", &bal)) {
+    ClassHandler::ClassMethod *method = bal->get_method("rebalance");
+    if (method) {
+      bufferlist indata, outdata;
+      indata.append(metrics);
+      int ret = method->exec(NULL, indata, outdata, "rebalance");
+      if (ret == 0) 
+        dout(0) << "load-target mapping from Lua, outdata=" << outdata.c_str() << dendl;
+      else
+        dout(0) << "something went wrong: " << ret << dendl;
+    }
   }
 
   // balance?
