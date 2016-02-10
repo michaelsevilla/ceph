@@ -88,6 +88,9 @@ void MDBalancer::tick()
     dout(15) << "tick last_sample now " << now << dendl;
     last_sample = now;
   }
+
+  // get the balancer version we want to use
+  dout(0) << "FOUND VERSION=" << mds->mdsmap->get_lua_balancer() << dendl;
   
   // first, try to pull metadata balancer from RADOS and store locally
   string const balancer = "bal_greedyspill";

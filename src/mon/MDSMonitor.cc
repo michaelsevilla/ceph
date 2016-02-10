@@ -1534,6 +1534,11 @@ int MDSMonitor::filesystem_command(
 	ss << "value must be false|no|0 or true|yes|1";
 	return -EINVAL;
       }
+    } else if (var == "lua_balancer_script") {
+      ss << "setting the metadata load balancer to " << val;
+      pending_mdsmap.lua_balancer_script = val;
+      wait_for_finished_proposal(op, new Monitor::C_Command(mon, op, r, ss.str(), get_last_committed() + 1));
+      return true;
     } else if (var == "max_file_size") {
       if (interr.length()) {
 	ss << var << " requires an integer value";

@@ -321,7 +321,7 @@ COMMAND("mds set_max_mds " \
 	"name=maxmds,type=CephInt,range=0", \
 	"set max MDS index", "mds", "rw", "cli,rest")
 COMMAND("mds set " \
-	"name=var,type=CephChoices,strings=max_mds|max_file_size|allow_new_snaps|inline_data " \
+	"name=var,type=CephChoices,strings=max_mds|max_file_size|allow_new_snaps|inline_data|lua_balancer_script " \
 	"name=val,type=CephString "					\
 	"name=confirm,type=CephString,req=false",			\
 	"set mds parameter <var> to <val>", "mds", "rw", "cli,rest")
