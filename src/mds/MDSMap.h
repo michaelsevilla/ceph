@@ -201,6 +201,7 @@ protected:
    */
 
   mds_rank_t max_mds; /* The maximum number of active MDSes. Also, the maximum rank. */
+  string lua_balancer_script; /* The name and version of the metadata load balancer. */
 
   std::set<mds_rank_t> in;              // currently defined cluster
   std::map<mds_rank_t,int32_t> inc;     // most recent incarnation.
@@ -296,6 +297,8 @@ public:
 
   mds_rank_t get_max_mds() const { return max_mds; }
   void set_max_mds(mds_rank_t m) { max_mds = m; }
+
+  string get_lua_balancer() { return lua_balancer_script; }
 
   mds_rank_t get_tableserver() const { return tableserver; }
   mds_rank_t get_root() const { return root; }
