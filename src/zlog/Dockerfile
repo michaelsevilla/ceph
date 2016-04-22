@@ -15,9 +15,17 @@ RUN apt-add-repository 'deb http://download.ceph.com/debian-jewel/ trusty main'
 RUN apt-get -y update
 RUN apt-get -y install libcephfs1 libcephfs-dev
 
+RUN apt-get -y install git
+
 ###
 ### cache a copy of ceph. we'll re-pull in entrypoint
 ###
 RUN mkdir /src
 RUN git clone --recursive --branch=malacology/jewel \
   https://github.com/noahdesu/ceph.git /src/ceph
+
+RUN apt-get -y install build-essential
+RUN apt-get -y install libboost-program-options-dev
+
+ADD entrypoint.sh /entrypoint.sh
+ENTRYPOINT [ "/entrypoint.sh" ]
