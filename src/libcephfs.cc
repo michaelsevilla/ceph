@@ -422,6 +422,11 @@ extern "C" int ceph_init(struct ceph_mount_info *cmount)
   return cmount->init();
 }
 
+extern "C" void ceph_set_cap_handle_delay(struct ceph_mount_info *cmount, double delay)
+{
+  cmount->get_client()->set_cap_handle_delay(delay);
+}
+
 extern "C" int ceph_mount(struct ceph_mount_info *cmount, const char *root)
 {
   std::string mount_root;
@@ -827,6 +832,13 @@ extern "C" int64_t ceph_lseek(struct ceph_mount_info *cmount, int fd,
   if (!cmount->is_mounted())
     return -ENOTCONN;
   return cmount->get_client()->lseek(fd, offset, whence);
+}
+
+extern "C" int ceph_set_lseek_target(struct ceph_mount_info *cmount, int fd)
+{
+  if (!cmount->is_mounted())
+    return -ENOTCONN;
+  return cmount->get_client()->set_lseek_target(fd);
 }
 
 extern "C" int ceph_read(struct ceph_mount_info *cmount, int fd, char *buf,
