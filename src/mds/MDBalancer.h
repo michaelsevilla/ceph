@@ -49,6 +49,12 @@ class MDBalancer {
   utime_t last_fragment;
   utime_t last_sample;    
   utime_t rebalance_time; //ensure a consistent view of load for rebalance
+  
+  // use to calculate instantanous CPU utilization
+  double cpu_load_avg;
+  double cpu_work_prev;
+  double cpu_total_prev;
+  double total_meta_load;
 
   // todo
   set<dirfrag_t>   split_queue, merge_queue;
@@ -82,7 +88,7 @@ public:
     messenger(msgr),
     mon_client(monc),
     beat_epoch(0),
-    last_epoch_under(0), last_epoch_over(0), my_load(0.0), target_load(0.0) { }
+    last_epoch_under(0), last_epoch_over(0), cpu_load_avg(0), cpu_work_prev(0), cpu_total_prev(0), total_meta_load(0), my_load(0.0), target_load(0.0) { }
   
   mds_load_t get_load(utime_t);
 
@@ -100,6 +106,7 @@ public:
   //set up the rebalancing targets for export and do one if the
   //MDSMap is up to date
   void prep_rebalance(int beat);
+  void prep_mantle_rebalance(string const balancer);
   /*check if the monitor has recorded the current export targets;
     if it has then do the actual export. Otherwise send off our
     export targets message again*/
