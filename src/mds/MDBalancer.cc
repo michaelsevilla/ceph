@@ -633,9 +633,22 @@ void MDBalancer::mantle_expose_metrics(lua_State *L) {
     /* each mds has an associated table of metrics */
     lua_newtable(L);
 
-    /* expose metric; set field assigns key and pops the val */
-    lua_pushnumber(L, 3);
-    lua_setfield(L, -2, "test");
+    /* grab the load struct for each mds */
+    map<mds_rank_t, mds_load_t>::value_type val(it, mds_load_t(ceph_clock_now(g_ceph_context)));
+    std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
+    mds_load_t &load(r.first->second);
+
+    /* expose metric; setfield assigns key and pops the val */
+    lua_pushnumber(L, load.auth.meta_load());
+    lua_setfield(L, -2, "auth.meta_load");
+    lua_pushnumber(L, load.all.meta_load());
+    lua_setfield(L, -2, "all.meta_load");
+    lua_pushnumber(L, load.req_rate);
+    lua_setfield(L, -2, "req_rate");
+    lua_pushnumber(L, load.queue_len);
+    lua_setfield(L, -2, "queue_len");
+    lua_pushnumber(L, load.cpu_load_avg);
+    lua_setfield(L, -2, "cpu_load_avg");
 
     /* set key for the metrics dict */
     lua_setfield(L, -2, "MDS0");
@@ -647,7 +660,7 @@ void MDBalancer::mantle_expose_metrics(lua_State *L) {
 
 int MDBalancer::mantle_prep_rebalance()
 {
-  string script = "BAL_LOG(0, \"test=\", metrics[\"MDS0\"][\"test\"])\n"
+  string script = "BAL_LOG(0, \"mds0 cpu=\", metrics[\"MDS0\"][\"cpu_load_avg\"])\n"
                   "return {3, 4, 5}";
   my_targets.clear();
 
