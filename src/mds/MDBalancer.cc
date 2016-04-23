@@ -35,13 +35,14 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <string.h>
 using std::map;
 using std::vector;
 
 #include "common/config.h"
 #include "common/errno.h"
 
-#define dout_subsys ceph_subsys_mds
+#define dout_subsys ceph_subsys_mds_balancer
 #undef DOUT_COND
 #define DOUT_COND(cct, l) l<=cct->_conf->debug_mds || l <= cct->_conf->debug_mds_balancer
 #undef dout_prefix
@@ -87,35 +88,6 @@ void MDBalancer::tick()
   if ((double)now - (double)last_sample > g_conf->mds_bal_sample_interval) {
     dout(15) << "tick last_sample now " << now << dendl;
     last_sample = now;
-  }
-
-  // get the balancer version we want to use
-  dout(0) << "FOUND VERSION=" << mds->mdsmap->get_lua_balancer() << dendl;
-  
-  // first, try to pull metadata balancer from RADOS and store locally
-  string const balancer = "bal_greedyspill";
-  localize_balancer(balancer);
-
-  string metrics = "0 "
-                   "0.11 0.22 0.33 0.44 0.55 0.66 "
-                   "1.11 1.22 1.33 1.44 1.55 1.66 "
-                   "2.11 2.22 2.33 2.44 2.55 2.66 ";
-
-  // try to dynamically open the balancer interface
-  ClassHandler *class_handler = new ClassHandler(g_ceph_context);
-  cls_initialize(class_handler);
-  ClassHandler::ClassData *bal = NULL;
-  if (!class_handler->open_class(balancer, &bal)) {
-    ClassHandler::ClassMethod *method = bal->get_method("rebalance");
-    if (method) {
-      bufferlist indata, outdata;
-      indata.append(metrics);
-      int ret = method->exec(NULL, indata, outdata, "rebalance");
-      if (ret == 0) 
-        dout(0) << "load-target mapping from Lua, outdata=" << outdata.c_str() << dendl;
-      else
-        dout(0) << "something went wrong: " << ret << dendl;
-    }
   }
 
   // balance?
@@ -197,9 +169,40 @@ mds_load_t MDBalancer::get_load(utime_t now)
   load.req_rate = mds->get_req_rate();
   load.queue_len = messenger->get_dispatch_queue_len();
 
-  ifstream cpu("/proc/loadavg");
-  if (cpu.is_open())
-    cpu >> load.cpu_load_avg;
+  // use instantaneous CPU util. (for flash crowds/hotspots) TODO: clean this up!
+  ifstream cpu("/proc/stat");
+  if (cpu.is_open()) {
+    map<string, double> procstat;
+    string temp; cpu >> temp;
+    cpu >> temp; procstat.insert(pair<string,double>("usr", atof(temp.c_str())));
+    cpu >> temp; procstat.insert(pair<string,double>("nice", atof(temp.c_str())));
+    cpu >> temp; procstat.insert(pair<string,double>("sys", atof(temp.c_str())));
+    cpu >> temp; procstat.insert(pair<string,double>("idle", atof(temp.c_str())));
+    cpu >> temp; procstat.insert(pair<string,double>("iowait", atof(temp.c_str())));
+    cpu >> temp; procstat.insert(pair<string,double>("irq", atof(temp.c_str())));
+    cpu >> temp; procstat.insert(pair<string,double>("softirq", atof(temp.c_str())));
+    cpu >> temp; procstat.insert(pair<string,double>("steal", atof(temp.c_str())));
+    cpu.close();
+    
+    double cpu_total = 0;
+    double cpu_work = 0;
+    for (map<string, double>:: iterator it = procstat.begin(); it != procstat.end(); it++) {
+      cpu_total += it->second;
+      if (!it->first.compare("usr") || !it->first.compare("sys") || !it->first.compare("nice"))
+        cpu_work += it->second;
+    }
+
+    // save sample if it's legit and calculate the moving average
+    double cpu_work_period = cpu_work - cpu_work_prev;
+    double cpu_total_period = cpu_total - cpu_total_prev;
+    if (cpu_total_period > 100 && cpu_work_period > 100) {
+      cpu_load_avg = 100*cpu_work_period/cpu_total_period;
+      cpu_work_prev = cpu_work;
+      cpu_total_prev = cpu_total;
+      dout(15) << "get_load cpu=" << cpu_work_period << "/" << cpu_total_period << "=" << load.cpu_load_avg << dendl;
+    }
+    load.cpu_load_avg = cpu_load_avg;
+  }
 
   dout(15) << "get_load " << load << dendl;
   return load;
@@ -216,7 +219,7 @@ void MDBalancer::localize_balancer(string const balancer)
   fname.append("/");
   fname.append(objname);
 
-  dout(15) << "looking for objname=" << objname << " in RADOS pool_id=" << pool_id << dendl;
+  dout(15) << "trying to pull balancer from RADOS; looking for objname=" << objname << " in RADOS pool_id=" << pool_id << dendl;
   object_t oid = object_t(objname);
   object_locator_t oloc(pool_id);
   bufferlist data;
@@ -339,7 +342,12 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
     if (mds_load.size() == cluster_size) {
       // let's go!
       //export_empties();  // no!
-      prep_rebalance(m->get_beat());
+
+      string const balancer = mds->mdsmap->get_lua_balancer();
+      if (balancer == "") 
+        prep_rebalance(m->get_beat());
+      else
+        prep_mantle_rebalance(balancer);
     }
   }
 
@@ -657,6 +665,69 @@ void MDBalancer::prep_rebalance(int beat)
   try_rebalance();
 }
 
+
+void MDBalancer::prep_mantle_rebalance(string const balancer)
+{
+  dout(5) << "using mantle; balancer version=" << balancer << dendl;
+  localize_balancer(balancer);
+
+  // pass per-MDS sextuplets to Lua balancer
+  string metrics = "";
+  metrics.append(to_string((mds->get_nodeid()) + 1) + " ");
+  int cluster_size = mds->get_mds_map()->get_num_in_mds();
+  for (mds_rank_t i=mds_rank_t(0); i < mds_rank_t(cluster_size); i++) {
+    map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
+    std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
+    mds_load_t &load(r.first->second);
+
+    dout(10) << "mds " << i << " has load < auth all req q cpu mem >:  "
+             << load.auth.meta_load() << " " << load.all.meta_load() << " "
+             << load.req_rate << " "  << load.queue_len << " " 
+             << load.cpu_load_avg << " " << "-1" << dendl;
+
+    metrics.append(to_string(load.auth.meta_load()) + " ");
+    metrics.append(to_string(load.all.meta_load()) + " ");
+    metrics.append(to_string(load.req_rate) + " ");
+    metrics.append(to_string(load.queue_len) + " ");
+    metrics.append(to_string(load.cpu_load_avg) + " ");
+    metrics.append("-1 "); 
+  }
+  
+  dout(10) << "metrics=" << metrics << dendl;
+  
+  //string metrics = "0 "
+  //                 "0.11 0.22 0.33 0.44 0.55 0.66 "
+  //                 "1.11 1.22 1.33 1.44 1.55 1.66 "
+  //                 "2.11 2.22 2.33 2.44 2.55 2.66 ";
+
+  // try to dynamically open the balancer interface
+  ClassHandler *class_handler = new ClassHandler(g_ceph_context);
+  cls_initialize(class_handler);
+  ClassHandler::ClassData *bal = NULL;
+  if (!class_handler->open_class(balancer, &bal)) {
+    ClassHandler::ClassMethod *method = bal->get_method("rebalance");
+    if (method) {
+      bufferlist indata, outdata;
+      indata.append(metrics);
+      int ret = method->exec(NULL, indata, outdata, "rebalance");
+      if (!ret) {
+        if (outdata.length() != 0) {
+          string target;
+          std::istringstream targets(outdata.c_str());
+          for (mds_rank_t m = mds_rank_t(0);
+               std::getline(targets, target, ' ');
+               m++)
+            my_targets[m] = atof(target.c_str());
+          dout(2) << " mantle decided that new targets=" << my_targets << dendl;
+          try_rebalance();
+        }
+        return;
+      }
+      dout(0) << "something went wrong executing the bal rebalance method: " << ret << dendl;
+    }
+    dout(0) << "NOT rebalancing -- something went wrong when opening the balancer class" << dendl;
+  } 
+}
 
 
 void MDBalancer::try_rebalance()
