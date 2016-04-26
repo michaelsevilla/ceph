@@ -667,12 +667,22 @@ void MDBalancer::prep_rebalance(int beat)
 
 void MDBalancer::prep_mantle_rebalance(string const balancer)
 {
+  dout(10) << "Preparing transfer to Lua and clearing mytargets=" << my_targets.size()
+           << " imported=" << imported.size() << " exported=" << exported.size() 
+           << dendl;
+  rebalance_time = ceph_clock_now(g_ceph_context);
+  my_targets.clear();
+  imported.clear();
+  exported.clear();
+  mds->mdcache->migrator->clear_export_queue();
+
+
   dout(5) << "using mantle; balancer version=" << balancer << dendl;
   localize_balancer(balancer);
 
-  // pass per-MDS sextuplets to Lua balancer
+  dout(10) << "pass per-MDS sextupletes to Mantle's Lua balancer" << dendl;
   string metrics = "";
-  metrics.append(to_string((mds->get_nodeid()) + 1) + " ");
+  metrics.append(to_string(mds->get_nodeid()) + " ");
   int cluster_size = mds->get_mds_map()->get_num_in_mds();
   for (mds_rank_t i=mds_rank_t(0); i < mds_rank_t(cluster_size); i++) {
     map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
@@ -691,13 +701,7 @@ void MDBalancer::prep_mantle_rebalance(string const balancer)
     metrics.append(to_string(load.cpu_load_avg) + " ");
     metrics.append("-1 "); 
   }
-  
   dout(10) << "metrics=" << metrics << dendl;
-  
-  //string metrics = "0 "
-  //                 "0.11 0.22 0.33 0.44 0.55 0.66 "
-  //                 "1.11 1.22 1.33 1.44 1.55 1.66 "
-  //                 "2.11 2.22 2.33 2.44 2.55 2.66 ";
 
   // try to dynamically open the balancer interface
   ClassHandler *class_handler = new ClassHandler(g_ceph_context);
