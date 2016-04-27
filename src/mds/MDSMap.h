@@ -298,7 +298,8 @@ public:
   mds_rank_t get_max_mds() const { return max_mds; }
   void set_max_mds(mds_rank_t m) { max_mds = m; }
 
-  string get_lua_balancer() { return lua_balancer_script; }
+  std::string get_lua_balancer() const { return lua_balancer_script; }
+  void set_lua_balancer(std::string val) { lua_balancer_script.assign(val); }
 
   mds_rank_t get_tableserver() const { return tableserver; }
   mds_rank_t get_root() const { return root; }

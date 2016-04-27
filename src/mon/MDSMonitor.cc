@@ -1886,8 +1886,14 @@ public:
       }
     } else if (var == "lua_balancer_script") {
       ss << "setting the metadata load balancer to " << val;
-      pending_mdsmap.lua_balancer_script = val;
-      wait_for_finished_proposal(op, new Monitor::C_Command(mon, op, r, ss.str(), get_last_committed() + 1));
+        fsmap.modify_filesystem(
+            fs->fscid,
+            [val](std::shared_ptr<Filesystem> fs)
+        {
+          fs->mds_map.set_lua_balancer(val);
+        });
+      //pending_mdsmap.lua_balancer_script = val;
+      //wait_for_finished_proposal(op, new Monitor::C_Command(mon, op, r, ss.str(), get_last_committed() + 1));
       return true;
     } else if (var == "max_file_size") {
       if (interr.length()) {
