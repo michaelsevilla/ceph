@@ -29,9 +29,20 @@ static std::atomic_ullong ios;
 
 static void run(struct ceph_mount_info *cmount)
 {
-  int fd = ceph_open(cmount, "/foo", O_CREAT, 0600);
+  int ret = ceph_mkdir(cmount, "/seqdir", 0755);
+  if (ret && ret != -EEXIST) {
+    std::cerr << "mkdir: " << strerror(-ret) << std::endl;
+    assert(0);
+  }
+
+  ret = ceph_mkdir(cmount, "/seqdir/seqdir", 0755);
+  if (ret && ret != -EEXIST) {
+    std::cerr << "mkdir: " << strerror(-ret) << std::endl;
+    assert(0);
+  }
+
+  int fd = ceph_open(cmount, "/seqdir/seqdir/seq", O_CREAT, 0600);
   assert(fd >= 0);
-  ceph_close(cmount, fd);
 
   for (;;) {
     /*
@@ -40,14 +51,17 @@ static void run(struct ceph_mount_info *cmount)
      * the file descriptor instead of the full path.
      */
     struct stat st;
-    int ret = ceph_stat(cmount, "/foo", &st);
+    //int ret = ceph_stat(cmount, "/foo", &st);
+    int ret = ceph_fstat(cmount, fd, &st);
     assert(ret == 0);
 
     ios++;
 
     if (stop)
-      return;
+      break;
   }
+
+  ceph_close(cmount, fd);
 }
 
 static void report(int period, std::string perf_file)
