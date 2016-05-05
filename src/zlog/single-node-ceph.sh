@@ -29,6 +29,10 @@ while [[ $# > 1 ]]; do
       noop_devs="$noop_devs $2"
       shift # past argument
       ;;
+    -m|--mds)
+      mds=true
+      shift
+      ;;
     *)
       # unknown option
       ;;
@@ -83,14 +87,19 @@ function reset_ceph_soft() {
   sudo stop ceph-all || true
   sudo stop ceph-all || true
   sudo stop ceph-osd id=0 || true
+  sudo stop ceph-mds id=$host || true
+  sudo stop ceph-mds id=$shorthost || true
   sudo stop ceph-mon id=$host || true
   sudo stop ceph-mon id=$shorthost || true
   sudo service ceph-osd-all stop || true
   sudo service ceph-osd-all stop || true
   sudo service ceph-mon-all stop || true
   sudo service ceph-mon-all stop || true
+  sudo service ceph-mds-all stop || true
+  sudo service ceph-mds-all stop || true
   sudo skill -9 ceph-osd || true
   sudo skill -9 ceph-mon || true
+  sudo skill -9 ceph-mds || true
   sleep 5
 
   sudo find /var/lib/ceph -mindepth 1 -maxdepth 2 -type d -exec umount {} \; || true
@@ -152,6 +161,13 @@ function create_ceph_and_start() {
   sudo stop ceph-osd id=0 || true
   sudo chown ceph:ceph /var/log/ceph/ceph-osd.0.log
   sudo start ceph-osd id=0 || true
+
+  if [ -z $mds ]; then
+    ceph-deploy mds create $host
+    ceph osd pool create cephfs_data 16
+    ceph osd pool create cephfs_metadata 16
+    ceph fs new cephfs1 cephfs_metadata cephfs_data
+  fi
 
   popd
 }
