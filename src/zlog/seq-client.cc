@@ -3,9 +3,11 @@
 #include <atomic>
 #include <thread>
 #include <cstdlib>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <boost/program_options.hpp>
 #include <cephfs/libcephfs.h>
 
@@ -27,7 +29,15 @@ static inline uint64_t getns()
 static volatile int stop;
 static std::atomic_ullong ios;
 
-static void run(struct ceph_mount_info *cmount)
+static void sigint_handler(int sig)
+{
+  stop = 1;
+}
+
+// <start, latency>
+static std::vector<std::pair<uint64_t, uint64_t>> latencies;
+
+static void run(struct ceph_mount_info *cmount, std::string filename, int delay)
 {
   int ret = ceph_mkdir(cmount, "/seqdir", 0755);
   if (ret && ret != -EEXIST) {
@@ -41,21 +51,27 @@ static void run(struct ceph_mount_info *cmount)
     assert(0);
   }
 
-  int fd = ceph_open(cmount, "/seqdir/seqdir/seq", O_CREAT, 0600);
+  std::stringstream ss;
+  ss << "/seqdir/seqdir/" << filename;
+  std::string path = ss.str();
+
+  std::cout << "path " << path << std::endl;
+
+  int fd = ceph_open(cmount, path.c_str(), O_CREAT|O_RDWR, 0600);
   assert(fd >= 0);
 
   for (;;) {
-    /*
-     * FIXME: ceph_fstat doesn't acquire caps, so it is always a round trip.
-     * that's a bug and we can submit a ticket / patch for that so we can stat
-     * the file descriptor instead of the full path.
-     */
-    struct stat st;
-    //int ret = ceph_stat(cmount, "/foo", &st);
-    int ret = ceph_fstat(cmount, fd, &st);
+    uint64_t start = getns();
+    //struct stat st;
+    //int ret = ceph_stat(cmount, path.c_str(), &st);
+    //int ret = ceph_fstat(cmount, fd, &st);
+    int64_t ret = ceph_lseek(cmount, fd, 0, SEEK_END);
+    uint64_t latency = getns() - start;
     assert(ret == 0);
 
     ios++;
+
+    latencies.emplace_back(start, latency);
 
     if (stop)
       break;
@@ -64,17 +80,30 @@ static void run(struct ceph_mount_info *cmount)
   ceph_close(cmount, fd);
 }
 
-static void report(int period, std::string perf_file)
+static void dump_latency(std::string file)
+{
+  if (file.size() == 0)
+    return;
+
+  int fd = 0;
+  fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0444);
+  assert(fd > 0);
+
+  for (auto entry : latencies) {
+    dprintf(fd, "%llu %llu\n",
+        (unsigned long long)entry.first,
+        (unsigned long long)entry.second);
+  }
+
+  fsync(fd);
+  close(fd);
+}
+
+static void report(int period)
 {
   ios = 0;
   uint64_t start_ns = getns();
   uint64_t expr_start_ns = start_ns;
-
-  int fd = 0;
-  if (perf_file.size()) {
-    fd = open(perf_file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0444);
-    assert(fd > 0);
-  }
 
   while (1) {
     // length of time to accumulate iops stats
@@ -91,19 +120,8 @@ static void report(int period, std::string perf_file)
     uint64_t elapsed_sec = (end_ns - expr_start_ns) / 1000000000ULL;
     std::cout << elapsed_sec << "s: " << "rate=" << (int)iops << " reqs" << std::endl;
 
-    if (fd) {
-      dprintf(fd, "%llu %llu\n",
-          (unsigned long long)end_ns,
-          (unsigned long long)iops);
-    }
-
-    if (stop) {
-      if (fd) {
-        close(fd);
-        fsync(fd);
-      }
+    if (stop)
       break;
-    }
   }
 }
 
@@ -112,12 +130,16 @@ int main(int argc, char **argv)
   int report_period;
   int runtime_sec;
   std::string perf_file;
+  std::string filename;
+  int delay;
 
   po::options_description desc("Allowed options");
   desc.add_options()
     ("report-sec", po::value<int>(&report_period)->default_value(5), "Report sec")
     ("runtime", po::value<int>(&runtime_sec)->default_value(30), "Runtime sec")
     ("perf_file", po::value<std::string>(&perf_file)->default_value(""), "Perf file")
+    ("filename", po::value<std::string>(&filename)->default_value("seq"), "Filename")
+    ("delay", po::value<int>(&delay)->default_value(0), "Delay")
   ;
 
   po::variables_map vm;
@@ -138,7 +160,11 @@ int main(int argc, char **argv)
   ret = ceph_mount(cmount, "/");
   assert(ret == 0);
 
+  latencies.reserve(20000000);
+
   std::cout << "Running for " << runtime_sec << " seconds" << std::endl;
+
+  assert(signal(SIGINT, sigint_handler) != SIG_ERR);
 
   stop = 0;
 
@@ -146,11 +172,11 @@ int main(int argc, char **argv)
    * Start workload
    */
   std::thread runner{[&] {
-    run(cmount);
+    run(cmount, filename, delay);
   }};
 
   std::thread reporter{[&] {
-    report(report_period, perf_file);
+    report(report_period);
   }};
 
   sleep(runtime_sec);
@@ -158,6 +184,8 @@ int main(int argc, char **argv)
 
   runner.join();
   reporter.join();
+
+  dump_latency(perf_file);
 
   /*
    * Clean-up connections...
