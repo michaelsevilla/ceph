@@ -75,11 +75,11 @@ function prepare() {
   fi
   
   if ! which ceph &> /dev/null; then
-    ceph-deploy install --release ${ceph_version} `hostname`
+    ceph-deploy install --release ${ceph_version} $shorthost
   fi
   
   if [ ! -e "/usr/include/rados/librados.hpp" ]; then
-    ceph-deploy pkg --install librados-dev `hostname`
+    ceph-deploy pkg --install librados-dev $shorthost
   fi
 }
 
@@ -121,7 +121,7 @@ function create_ceph_and_start() {
   pushd $cdir
 
   # start new ceph cluster
-  ceph-deploy new $host
+  ceph-deploy new $shorthost
   
   # removes the auth lines which we'll put back next
   sed -i '/auth_.*_required = cephx/d' ./ceph.conf
@@ -138,9 +138,9 @@ function create_ceph_and_start() {
   ceph-deploy mon create-initial
   
   # clean up storage devices
-  ceph-deploy disk zap $host:$data_dev
+  ceph-deploy disk zap $shorthost:$data_dev
   if [ "$journal_dev" != "none" ]; then
-    ceph-deploy disk zap $host:$journal_dev
+    ceph-deploy disk zap $shorthost:$journal_dev
   fi
   
   # set scheduler for devices
@@ -152,9 +152,9 @@ function create_ceph_and_start() {
   
   # create osd
   if [ "$journal_dev" != "none" ]; then
-    ceph-deploy osd create $host:$data_dev:$journal_dev
+    ceph-deploy osd create $shorthost:$data_dev:$journal_dev
   else
-    ceph-deploy osd create $host:$data_dev
+    ceph-deploy osd create $shorthost:$data_dev
   fi
 
   sudo stop ceph-osd id=0 || true
@@ -163,7 +163,7 @@ function create_ceph_and_start() {
   sudo start ceph-osd id=0 || true
 
   if [ -z $mds ]; then
-    ceph-deploy mds create $host
+    ceph-deploy mds create $shorthost
     ceph osd pool create cephfs_data 16
     ceph osd pool create cephfs_metadata 16
     ceph fs new cephfs1 cephfs_metadata cephfs_data
