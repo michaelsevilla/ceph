@@ -37,7 +37,7 @@ static void sigint_handler(int sig)
 // <start, latency>
 static std::vector<std::pair<uint64_t, uint64_t>> latencies;
 
-static void run(struct ceph_mount_info *cmount, std::string filename, int delay)
+static void run(struct ceph_mount_info *cmount, std::string filename, bool idle, bool record_latency)
 {
   int ret = ceph_mkdir(cmount, "/seqdir", 0755);
   if (ret && ret != -EEXIST) {
@@ -60,6 +60,15 @@ static void run(struct ceph_mount_info *cmount, std::string filename, int delay)
   int fd = ceph_open(cmount, path.c_str(), O_CREAT|O_RDWR, 0600);
   assert(fd >= 0);
 
+  // hold the file open but don't do anything
+  if (idle) {
+    while (!stop) {
+      sleep(2);
+    }
+    ceph_close(cmount, fd);
+    return;
+  }
+
   for (;;) {
     uint64_t start = getns();
     //struct stat st;
@@ -71,7 +80,8 @@ static void run(struct ceph_mount_info *cmount, std::string filename, int delay)
 
     ios++;
 
-    latencies.emplace_back(start, latency);
+    if (record_latency)
+      latencies.emplace_back(start, latency);
 
     if (stop)
       break;
@@ -131,7 +141,7 @@ int main(int argc, char **argv)
   int runtime_sec;
   std::string perf_file;
   std::string filename;
-  int delay;
+  bool idle;
 
   po::options_description desc("Allowed options");
   desc.add_options()
@@ -139,7 +149,7 @@ int main(int argc, char **argv)
     ("runtime", po::value<int>(&runtime_sec)->default_value(30), "Runtime sec")
     ("perf_file", po::value<std::string>(&perf_file)->default_value(""), "Perf file")
     ("filename", po::value<std::string>(&filename)->default_value("seq"), "Filename")
-    ("delay", po::value<int>(&delay)->default_value(0), "Delay")
+    ("idle", po::value<bool>(&idle)->default_value(false), "Idle")
   ;
 
   po::variables_map vm;
@@ -160,7 +170,8 @@ int main(int argc, char **argv)
   ret = ceph_mount(cmount, "/");
   assert(ret == 0);
 
-  latencies.reserve(20000000);
+  if (perf_file.size())
+    latencies.reserve(20000000);
 
   std::cout << "Running for " << runtime_sec << " seconds" << std::endl;
 
@@ -172,7 +183,7 @@ int main(int argc, char **argv)
    * Start workload
    */
   std::thread runner{[&] {
-    run(cmount, filename, delay);
+    run(cmount, filename, idle, perf_file.size() > 0);
   }};
 
   std::thread reporter{[&] {
