@@ -30,6 +30,9 @@ static inline uint64_t getns()
 static volatile int stop;
 static std::atomic_ullong ios;
 
+static uint64_t run_start_ns;
+static uint64_t run_end_ns;
+
 static void sigint_handler(int sig)
 {
   stop = 1;
@@ -61,6 +64,9 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
   int fd = ceph_open(cmount, path.c_str(), O_CREAT|O_RDWR, 0600);
   assert(fd >= 0);
 
+  int r = ceph_set_lseek_target(cmount, fd);
+  assert(r == 0);
+
   // hold the file open but don't do anything
   if (idle) {
     while (!stop) {
@@ -69,6 +75,10 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
     ceph_close(cmount, fd);
     return;
   }
+
+  long skip = 200;
+  
+  run_start_ns = 0;
 
   for (;;) {
     uint64_t start = getns();
@@ -81,11 +91,22 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
 
     ios++;
 
+    if (stop) {
+      run_end_ns = getns();
+      break;
+    }
+
+    // warm up
+    if (skip) {
+      skip--;
+      continue;
+    }
+
+    if (!run_start_ns)
+      run_start_ns = getns();
+
     if (record_latency)
       latencies.emplace_back(start, latency);
-
-    if (stop)
-      break;
   }
 
   ceph_close(cmount, fd);
@@ -96,6 +117,9 @@ static void dump_latency(std::string file)
   if (file.size() == 0)
     return;
 
+  /*
+   * ecdf stuff
+   */
   const size_t num_latencies = latencies.size();
   std::sort(latencies.begin(), latencies.end(),
       [](const std::pair<uint64_t, uint64_t>& a,
@@ -121,10 +145,24 @@ static void dump_latency(std::string file)
   for (int i = 0; i < 1000; i++)
     samples.insert(dis(gen));
 
+  /*
+   * throughput
+   */
+  uint64_t ios = num_latencies;
+  uint64_t dur_ns = run_end_ns - run_start_ns;
+  double iops = (double)(ios * 1000000000ULL) / (double)dur_ns;
+
+  /*
+   * output
+   */
   int fd = 0;
   fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0644);
   assert(fd > 0);
 
+  // average throughput
+  dprintf(fd, "%f\n", iops);
+
+  // latency cdf
   for (auto it = samples.begin(); it != samples.end(); it++) {
     size_t pos = *it;
     dprintf(fd, "%llu,%f\n",

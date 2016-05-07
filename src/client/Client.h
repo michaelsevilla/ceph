@@ -376,6 +376,7 @@ public:
   void sync_write_commit(InodeRef& in);
 
   void set_cap_handle_delay(double delay);
+  int set_lseek_target(int fd);
 
 protected:
   Filer                 *filer;     
@@ -414,6 +415,7 @@ protected:
   bool plug_handle_cap;
   double cap_handle_delay;
   std::list<MClientCaps*> delayed_handle_caps;
+  inodeno_t lseek_target = 0;
 
 
   /* async block write barrier support */

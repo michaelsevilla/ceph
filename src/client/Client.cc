@@ -2392,6 +2392,22 @@ void Client::handle_osd_map(MOSDMap *m)
 
 // ------------------------
 // incoming messages
+//
+
+int Client::set_lseek_target(int fd)
+{
+  Mutex::Locker lock(client_lock);
+
+  Fh *f = get_filehandle(fd);
+  if (!f)
+    return -EBADF;
+
+  Inode *in = f->inode.get();
+
+  lseek_target = in->ino;
+
+  return 0;
+}
 
 void Client::set_cap_handle_delay(double delay)
 {
@@ -2441,16 +2457,11 @@ bool Client::ms_dispatch(Message *m)
     {
       auto mm = static_cast<MClientCaps*>(m);
 
-      //Inode *in = 0;
-      //vinodeno_t vino(mm->get_ino(), CEPH_NOSNAP);
-      //auto it = inode_map.find(vino);
-      //if (it != inode_map.end())
-      //  in = it->second;
-
-      inodeno_t target = 1099511627778ULL;
+      //inodeno_t target = 1099511627778ULL;
+      inodeno_t target = lseek_target;
       bool is_target = (mm->get_ino() == target) && (mm->get_caps() == 2133);
 
-      if (plug_handle_cap && is_target && cap_handle_delay > 0.0) {
+      if (target > 0 && plug_handle_cap && is_target && cap_handle_delay > 0.0) {
         delayed_handle_caps.push_back(mm);
       } else {
         handle_caps(static_cast<MClientCaps*>(m));
