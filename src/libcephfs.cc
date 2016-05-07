@@ -422,6 +422,11 @@ extern "C" int ceph_init(struct ceph_mount_info *cmount)
   return cmount->init();
 }
 
+extern "C" void ceph_set_cap_handle_delay(struct ceph_mount_info *cmount, double delay)
+{
+  cmount->get_client()->set_cap_handle_delay(delay);
+}
+
 extern "C" int ceph_mount(struct ceph_mount_info *cmount, const char *root)
 {
   std::string mount_root;

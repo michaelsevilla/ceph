@@ -3,6 +3,7 @@
 #include <atomic>
 #include <thread>
 #include <cstdlib>
+#include <random>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -95,14 +96,40 @@ static void dump_latency(std::string file)
   if (file.size() == 0)
     return;
 
+  const size_t num_latencies = latencies.size();
+  std::sort(latencies.begin(), latencies.end(),
+      [](const std::pair<uint64_t, uint64_t>& a,
+        const std::pair<uint64_t, uint64_t>& b) {
+      return a.second < b.second;
+  });
+
+  std::vector<double> ecdf;
+  ecdf.reserve(num_latencies);
+  for (size_t count = 0; count < num_latencies; count++) {
+    double p = (double)count / (double)num_latencies;
+    ecdf.push_back(p);
+  }
+
+  std::set<size_t> samples;
+  samples.insert(0);
+  samples.insert(num_latencies-1);
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> dis(1, num_latencies-2);
+
+  for (int i = 0; i < 1000; i++)
+    samples.insert(dis(gen));
+
   int fd = 0;
-  fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0444);
+  fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0644);
   assert(fd > 0);
 
-  for (auto entry : latencies) {
-    dprintf(fd, "%llu %llu\n",
-        (unsigned long long)entry.first,
-        (unsigned long long)entry.second);
+  for (auto it = samples.begin(); it != samples.end(); it++) {
+    size_t pos = *it;
+    dprintf(fd, "%llu,%f\n",
+        (unsigned long long)latencies[pos].second,
+        ecdf[pos]);
   }
 
   fsync(fd);
@@ -142,6 +169,7 @@ int main(int argc, char **argv)
   std::string perf_file;
   std::string filename;
   bool idle;
+  double capdelay;
 
   po::options_description desc("Allowed options");
   desc.add_options()
@@ -150,6 +178,7 @@ int main(int argc, char **argv)
     ("perf_file", po::value<std::string>(&perf_file)->default_value(""), "Perf file")
     ("filename", po::value<std::string>(&filename)->default_value("seq"), "Filename")
     ("idle", po::value<bool>(&idle)->default_value(false), "Idle")
+    ("capdelay", po::value<double>(&capdelay)->default_value(0.0), "cap delay")
   ;
 
   po::variables_map vm;
@@ -178,6 +207,9 @@ int main(int argc, char **argv)
   assert(signal(SIGINT, sigint_handler) != SIG_ERR);
 
   stop = 0;
+
+  if (capdelay > 0.0)
+    ceph_set_cap_handle_delay(cmount, capdelay);
 
   /*
    * Start workload
