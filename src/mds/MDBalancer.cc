@@ -32,6 +32,7 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <lua.hpp>
 using std::map;
 using std::vector;
 
