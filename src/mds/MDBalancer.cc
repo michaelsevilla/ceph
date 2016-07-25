@@ -32,6 +32,7 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <lua.hpp>
 using std::map;
 using std::vector;
 
@@ -274,6 +275,8 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
     if (mds_load.size() == cluster_size) {
       // let's go!
       //export_empties();  // no!
+      if (!mantle_prep_rebalance())
+        return;
       prep_rebalance(m->get_beat());
     }
   }
@@ -590,6 +593,116 @@ void MDBalancer::prep_rebalance(int beat)
     }
   }
   try_rebalance();
+}
+
+
+
+int dout_wrapper(lua_State *L)
+{
+  #undef dout_prefix
+  #define dout_prefix *_dout << "lua.balancer "
+
+  /* Lua indexes the stack from the bottom up */
+  int bottom = -1 * lua_gettop(L);
+  if (!lua_isinteger(L, bottom)) {
+    dout(0) << "WARNING: BAL_LOG has no message" << dendl;
+    return -EINVAL;
+  }
+
+  /* bottom of the stack is the log level */
+  int level = lua_tointeger(L, bottom);
+
+  /* rest of the stack is the message */
+  string msg = "";
+  for(int i = bottom + 1; i < 0; i++)
+    msg.append(lua_tostring(L, i));
+
+  dout(level) << msg << dendl;
+  return 0;
+}
+
+void MDBalancer::mantle_expose_metrics(lua_State *L) {
+  /* table to hold all metrics */
+  lua_newtable(L);
+
+  /* fill in the metrics for each mds */
+  for (mds_rank_t it =mds_rank_t(0);
+       it < mds_rank_t(mds->get_mds_map()->get_num_in_mds());
+       it++) {
+
+    /* each mds has an associated table of metrics */
+    lua_newtable(L);
+
+    /* expose metric; set field assigns key and pops the val */
+    lua_pushnumber(L, 3);
+    lua_setfield(L, -2, "test");
+
+    /* set key for the metrics dict */
+    lua_setfield(L, -2, "MDS0");
+  }
+
+  /* global metrics table exposed to Lua */
+  lua_setglobal(L, "metrics");
+}
+
+int MDBalancer::mantle_prep_rebalance()
+{
+  string script = "BAL_LOG(0, \"test=\", metrics[\"MDS0\"][\"test\"])\n"
+                  "return {3, 4, 5}";
+  my_targets.clear();
+
+  /* build lua vm state */
+  lua_State *L = luaL_newstate(); 
+  if (!L) {
+    dout(0) << "WARNING: mantle could not load Lua state" << dendl;
+    return -ENOEXEC;
+  }
+
+  /* load the balancer */
+  if (luaL_loadstring(L, script.c_str())) {
+    dout(0) << "WARNING: mantle could not load balancer: "
+            << lua_error(L) << dendl;
+    lua_close(L);
+    return -EINVAL;
+  }
+
+  /* setup debugging */
+  lua_register(L, "BAL_LOG", dout_wrapper);
+
+  /* put metrics into a table in Lua */
+  mantle_expose_metrics(L);
+
+  /* compile/execute balancer */
+  int ret = lua_pcall(L, 0, LUA_MULTRET, 0);
+  #undef dout_prefix
+  #define dout_prefix *_dout << mds << ".bal "
+
+  if (ret) {
+    dout(0) << "WARNING: mantle could not execute script: " 
+            << lua_tostring(L, -1) << dendl;
+    lua_close(L);
+    return -EINVAL;
+  }
+
+  if (lua_istable(L, -1) == 0 ||
+      mds->get_mds_map()->get_num_in_mds() != lua_rawlen(L, -1)) {
+    dout(0) << "WARNING: mantle script returned a malformed response" << dendl;
+    lua_close(L);
+    return -EINVAL;
+  }
+
+  /* parse response by iterating over Lua stack */
+  mds_rank_t it = mds_rank_t(0);
+  lua_pushnil(L);
+  while (lua_next(L, -2) != 0) {
+    my_targets[it] = (lua_tointeger(L, -1));
+    lua_pop(L, 1);
+    it++;
+  }
+
+  lua_close(L);
+  try_rebalance();
+  return 0;
 }
 
 

@@ -17,6 +17,7 @@
 #ifndef CEPH_MDBALANCER_H
 #define CEPH_MDBALANCER_H
 
+#include <lua.hpp>
 #include <list>
 #include <map>
 using std::list;
@@ -96,9 +97,12 @@ public:
   void do_fragmenting();
 
   void export_empties();
+
+  void mantle_expose_metrics(lua_State *L);
   //set up the rebalancing targets for export and do one if the
   //MDSMap is up to date
   void prep_rebalance(int beat);
+  int mantle_prep_rebalance();
   /*check if the monitor has recorded the current export targets;
     if it has then do the actual export. Otherwise send off our
     export targets message again*/
