@@ -31,7 +31,8 @@ LIBMDS_SOURCES = \
 	mds/SessionMap.cc \
 	mds/MDSContext.cc \
 	mds/MDSAuthCaps.cc \
-	mds/MDLog.cc
+	mds/MDLog.cc \
+	mds/Mantle.cc
 LIBMDS_DEPS = $(LIBOSDC)
 
 if ENABLE_CLIENT

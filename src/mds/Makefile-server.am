@@ -1,7 +1,8 @@
 if WITH_MDS
 
 libmds_la_SOURCES = $(LIBMDS_SOURCES)
-libmds_la_LIBADD = $(LIBMDS_DEPS)
+libmds_la_LIBADD = $(LIBMDS_DEPS) $(LIBLUA)
+libmds_la_CPPFLAGS = $(LIBLUA_CPPFLAGS)
 noinst_LTLIBRARIES += libmds.la
 
 noinst_HEADERS += \
@@ -51,7 +52,8 @@ noinst_HEADERS += \
 	mds/mds_table_types.h \
 	mds/mdstypes.h \
 	mds/snap.h \
-	mds/MDSContinuation.h
+	mds/MDSContinuation.h \
+        mds/Mantle.h
 
 noinst_HEADERS += \
 	mds/events/ECommitted.h \
