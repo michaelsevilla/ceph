@@ -22,6 +22,7 @@
 #include "CDir.h"
 #include "MDCache.h"
 #include "Migrator.h"
+#include "Mantle.h"
 
 #include "include/Context.h"
 #include "msg/Messenger.h"
@@ -274,6 +275,8 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
     if (mds_load.size() == cluster_size) {
       // let's go!
       //export_empties();  // no!
+      if (!mantle_prep_rebalance())
+        return;
       prep_rebalance(m->get_beat());
     }
   }
@@ -590,6 +593,48 @@ void MDBalancer::prep_rebalance(int beat)
     }
   }
   try_rebalance();
+}
+
+
+
+int MDBalancer::mantle_prep_rebalance()
+{
+  /* hard-code lua balancer */
+  string script = "BAL_LOG(0, \"I am mds \"..whoami)\n return {11, 12, 3}";
+
+  /* prepare for balancing */
+  int cluster_size = mds->get_mds_map()->get_num_in_mds();
+  rebalance_time = ceph_clock_now(g_ceph_context);
+  my_targets.clear();
+  imported.clear();
+  exported.clear();
+  mds->mdcache->migrator->clear_export_queue();
+
+  /* fill in the metrics for each mds by grabbing load struct */
+  vector < map<string, double> > metrics (cluster_size);
+  for (mds_rank_t i=mds_rank_t(0);
+       i < mds_rank_t(cluster_size);
+       i++) {
+    map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
+    std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
+    mds_load_t &load(r.first->second);
+
+    metrics[i].insert(make_pair("auth.meta_load", load.auth.meta_load()));
+    metrics[i].insert(make_pair("all.meta_load", load.all.meta_load()));
+    metrics[i].insert(make_pair("req_rate", load.req_rate));
+    metrics[i].insert(make_pair("queue_len", load.queue_len));
+    metrics[i].insert(make_pair("cpu_load_avg", load.cpu_load_avg));
+  }
+
+  /* execute the balancer */
+  Mantle *mantle = new Mantle();
+  int ret = mantle->balance(script, mds->get_nodeid(), metrics, my_targets);
+  delete mantle;
+  dout(2) << " mantle decided that new targets=" << my_targets << dendl;
+
+  if (!ret)
+    try_rebalance();
+  return ret;
 }
 
 
