@@ -626,7 +626,7 @@ void MDBalancer::prep_mantle_rebalance()
 
   /* expose metrics to Lua balancer */
   lua_newtable(L);
-  for (mds_rank_t i=mds_rank_t(0); i < mds_rank_t(cluster_size); i++) {
+  for (mds_rank_t i=mds_rank_t(0); i < mds_rank_t(cluster_size); i++)
     append_mantle_metric(L, i + 1, 3);
   lua_setglobal(L, "cpu");
 
