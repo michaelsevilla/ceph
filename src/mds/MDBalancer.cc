@@ -275,8 +275,8 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
     if (mds_load.size() == cluster_size) {
       // let's go!
       //export_empties();  // no!
-      //prep_rebalance(m->get_beat());
-      prep_mantle_rebalance();
+      if (prep_mantle_rebalance() != 0) 
+        prep_rebalance(m->get_beat());
     }
   }
 
@@ -618,7 +618,7 @@ int dout_wrapper(lua_State *L)
 }
 
 
-void MDBalancer::prep_mantle_rebalance()
+int MDBalancer::prep_mantle_rebalance()
 {
   string script = "BAL_LOG(0, \"Hello, World! (from Lua)\")\n"
                   "return {cpu[1], cpu[2], cpu[3]}";
@@ -629,7 +629,7 @@ void MDBalancer::prep_mantle_rebalance()
   lua_State *L = luaL_newstate(); 
   if (!L) {
     dout(0) << "WARNING: mantle could not load Lua state" << dendl;
-    return;
+    return -ENOEXEC;
   }
 
   /* load the balancer */
@@ -637,7 +637,7 @@ void MDBalancer::prep_mantle_rebalance()
     dout(0) << "WARNING: mantle could not load balancer: "
             << lua_error(L) << dendl;
     lua_close(L);
-    return;
+    return -EINVAL;
   }
 
   /* logging to the mds logs */
@@ -654,7 +654,7 @@ void MDBalancer::prep_mantle_rebalance()
     dout(0) << "WARNING: mantle could not execute script: " 
             << lua_tostring(L, -1) << dendl;
     lua_close(L);
-    return;
+    return -EINVAL;
   }
   #undef dout_prefix
   #define dout_prefix *_dout << "mds." << mds->get_nodeid() << ".bal "
@@ -664,7 +664,7 @@ void MDBalancer::prep_mantle_rebalance()
       cluster_size != int(lua_rawlen(L, -1))) {
     dout(0) << "WARNING: mantle script returned a malformed response" << dendl;
     lua_close(L);
-    return;
+    return -EINVAL;
   }
 
   /* parsing Lua response */
@@ -678,6 +678,7 @@ void MDBalancer::prep_mantle_rebalance()
 
   lua_close(L);
   try_rebalance();
+  return 0;
 }
 
 

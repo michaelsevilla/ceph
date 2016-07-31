@@ -102,7 +102,7 @@ public:
   //set up the rebalancing targets for export and do one if the
   //MDSMap is up to date
   void prep_rebalance(int beat);
-  void prep_mantle_rebalance();
+  int prep_mantle_rebalance();
   /*check if the monitor has recorded the current export targets;
     if it has then do the actual export. Otherwise send off our
     export targets message again*/
