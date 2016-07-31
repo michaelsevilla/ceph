@@ -602,10 +602,26 @@ void MDBalancer::append_mantle_metric(lua_State *L, int index, int val)
   lua_rawset(L, -3);
 }
 
+int dout_wrapper(lua_State *L)
+{
+  #undef dout_prefix
+  #define dout_prefix *_dout << "lua.balancer "
+  int nargs = lua_gettop(L);
+  if (nargs != 2) {
+    dout(0) << "WARNING: BAL_LOG used incorrectly, nargs=" << nargs << dendl;
+    return -EINVAL;
+  }
+
+  /* first arg is the log level, second arg is the msg*/
+  dout(lua_tointeger(L, -2)) << lua_tostring(L, -1) << dendl;
+  return 0;
+}
+
 
 void MDBalancer::prep_mantle_rebalance()
 {
-  string script = "return {cpu[1], cpu[2], cpu[3]}";
+  string script = "BAL_LOG(0, \"Hello, World! (from Lua)\")\n"
+                  "return {cpu[1], cpu[2], cpu[3]}";
   int cluster_size = mds->get_mds_map()->get_num_in_mds();
   my_targets.clear();
 
@@ -624,6 +640,9 @@ void MDBalancer::prep_mantle_rebalance()
     return;
   }
 
+  /* logging to the mds logs */
+  lua_register(L, "BAL_LOG", dout_wrapper);
+
   /* expose metrics to Lua balancer */
   lua_newtable(L);
   for (mds_rank_t i=mds_rank_t(0); i < mds_rank_t(cluster_size); i++)
@@ -637,6 +656,8 @@ void MDBalancer::prep_mantle_rebalance()
     lua_close(L);
     return;
   }
+  #undef dout_prefix
+  #define dout_prefix *_dout << "mds." << mds->get_nodeid() << ".bal "
 
   /* check for maformed Lua response */
   if (lua_istable(L, -1) == 0 ||
