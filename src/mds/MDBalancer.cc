@@ -275,7 +275,8 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
     if (mds_load.size() == cluster_size) {
       // let's go!
       //export_empties();  // no!
-      prep_rebalance(m->get_beat());
+      //prep_rebalance(m->get_beat());
+      prep_mantle_rebalance();
     }
   }
 
@@ -590,6 +591,71 @@ void MDBalancer::prep_rebalance(int beat)
       }
     }
   }
+  try_rebalance();
+}
+
+
+void MDBalancer::append_mantle_metric(lua_State *L, int index, int val)
+{
+  lua_pushinteger(L, index);
+  lua_pushnumber(L, val);
+  lua_rawset(L, -3);
+}
+
+
+void MDBalancer::prep_mantle_rebalance()
+{
+  string script = "return {cpu[1], cpu[2], cpu[3]}";
+  int cluster_size = mds->get_mds_map()->get_num_in_mds();
+  my_targets.clear();
+
+  /* build lua vm state */
+  lua_State *L = luaL_newstate(); 
+  if (!L) {
+    dout(0) << "WARNING: mantle could not load Lua state" << dendl;
+    return;
+  }
+
+  /* load the balancer */
+  if (luaL_loadstring(L, script.c_str())) {
+    dout(0) << "WARNING: mantle could not load balancer: "
+            << lua_error(L) << dendl;
+    lua_close(L);
+    return;
+  }
+
+  /* expose metrics to Lua balancer */
+  lua_newtable(L);
+  for (mds_rank_t i=mds_rank_t(0); i < mds_rank_t(cluster_size); i++) {
+    append_mantle_metric(L, i + 1, 3);
+  lua_setglobal(L, "cpu");
+
+  /* compile/execute the balancer (use error-checking call) */
+  if (lua_pcall(L, 0, LUA_MULTRET, 0)) {
+    dout(0) << "WARNING: mantle could not execute script: " 
+            << lua_tostring(L, -1) << dendl;
+    lua_close(L);
+    return;
+  }
+
+  /* check for maformed Lua response */
+  if (lua_istable(L, -1) == 0 ||
+      cluster_size != int(lua_rawlen(L, -1))) {
+    dout(0) << "WARNING: mantle script returned a malformed response" << dendl;
+    lua_close(L);
+    return;
+  }
+
+  /* parsing Lua response */
+  mds_rank_t it = mds_rank_t(0);
+  lua_pushnil(L);
+  while (lua_next(L, -2) != 0) {
+    my_targets[it] = (lua_tointeger(L, -1));
+    lua_pop(L, 1);
+    it++;
+  }
+
+  lua_close(L);
   try_rebalance();
 }
 
