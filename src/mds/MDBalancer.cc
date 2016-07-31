@@ -37,7 +37,7 @@ using std::vector;
 
 #include "common/config.h"
 
-#define dout_subsys ceph_subsys_mds
+#define dout_subsys ceph_subsys_mds_balancer
 #undef DOUT_COND
 #define DOUT_COND(cct, l) l<=cct->_conf->debug_mds || l <= cct->_conf->debug_mds_balancer
 #undef dout_prefix
