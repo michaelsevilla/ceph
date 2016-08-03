@@ -685,10 +685,13 @@ int MDBalancer::mantle_prep_rebalance()
   /* put metrics into a table in Lua */
   mantle_expose_metrics(L);
 
+  /* balancer policies can use basic Lua functions */
+  luaopen_base(L);
+
   /* compile/execute balancer */
   int ret = lua_pcall(L, 0, LUA_MULTRET, 0);
   #undef dout_prefix
-  #define dout_prefix *_dout << mds << ".bal "
+  #define dout_prefix *_dout << "mds." << mds->get_nodeid() << ".bal "
 
   if (ret) {
     dout(0) << "WARNING: mantle could not execute script: " 
