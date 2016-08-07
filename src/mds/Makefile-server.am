@@ -52,7 +52,8 @@ noinst_HEADERS += \
 	mds/mds_table_types.h \
 	mds/mdstypes.h \
 	mds/snap.h \
-	mds/MDSContinuation.h
+	mds/MDSContinuation.h \
+        mds/Mantle.h
 
 noinst_HEADERS += \
 	mds/events/ECommitted.h \

@@ -22,6 +22,7 @@
 #include "CDir.h"
 #include "MDCache.h"
 #include "Migrator.h"
+#include "Mantle.h"
 
 #include "include/Context.h"
 #include "msg/Messenger.h"
@@ -275,6 +276,8 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
     if (mds_load.size() == cluster_size) {
       // let's go!
       //export_empties();  // no!
+      Mantle *mantle = new Mantle();
+      mantle->export_metrics();
       if (!mantle_prep_rebalance())
         return;
       prep_rebalance(m->get_beat());
@@ -613,32 +616,31 @@ int dout_wrapper(lua_State *L)
   int level = lua_tointeger(L, bottom);
 
   /* rest of the stack is the message */
-  string msg = "";
-  for(int i = bottom + 1; i < 0; i++)
-    msg.append(lua_tostring(L, i));
+  string s = "";
+  for (int i = bottom + 1; i < 0; i++)
+    lua_isstring(L, i) ? s.append(lua_tostring(L, i)) : s.append("<empty>");
 
-  dout(level) << msg << dendl;
+  dout(level) << s << dendl;
   return 0;
 }
 
-void MDBalancer::mantle_expose_metrics(lua_State *L) {
+void MDBalancer::mantle_push_metrics(lua_State *L) {
   /* table to hold all metrics */
   lua_newtable(L);
 
-  /* fill in the metrics for each mds */
-  for (mds_rank_t it =mds_rank_t(0);
-       it < mds_rank_t(mds->get_mds_map()->get_num_in_mds());
-       it++) {
-
-    /* each mds has an associated table of metrics */
-    lua_newtable(L);
-
-    /* grab the load struct for each mds */
-    map<mds_rank_t, mds_load_t>::value_type val(it, mds_load_t(ceph_clock_now(g_ceph_context)));
+  /* fill in the metrics for each mds by grabbing load struct */
+  for (mds_rank_t i=mds_rank_t(0);
+       i < mds_rank_t(mds->get_mds_map()->get_num_in_mds());
+       i++) {
+    map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
     std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
     mds_load_t &load(r.first->second);
 
-    /* expose metric; setfield assigns key and pops the val */
+    /* this mds has an associated table of metrics */
+    lua_pushinteger(L, i);
+    lua_newtable(L);
+
+    /* push metric; setfield assigns key and pops the val */
     lua_pushnumber(L, load.auth.meta_load());
     lua_setfield(L, -2, "auth.meta_load");
     lua_pushnumber(L, load.all.meta_load());
@@ -650,18 +652,20 @@ void MDBalancer::mantle_expose_metrics(lua_State *L) {
     lua_pushnumber(L, load.cpu_load_avg);
     lua_setfield(L, -2, "cpu_load_avg");
 
-    /* set key for the metrics dict */
-    lua_setfield(L, -2, "MDS0");
+    /* in the table at at stack[-3], set k=stack[-1] to v=stack[-2] */
+    lua_rawset(L, -3);
   }
 
-  /* global metrics table exposed to Lua */
-  lua_setglobal(L, "metrics");
+  /* global mds table exposed to Lua */
+  lua_setglobal(L, "mds");
 }
 
 int MDBalancer::mantle_prep_rebalance()
 {
-  string script = "BAL_LOG(0, \"mds0 cpu=\", metrics[\"MDS0\"][\"cpu_load_avg\"])\n"
-                  "return {3, 4, 5}";
+  /* load script from localfs */
+  ifstream t("/tmp/test.lua");
+  string script((std::istreambuf_iterator<char>(t)),
+                 std::istreambuf_iterator<char>()); 
   my_targets.clear();
 
   /* build lua vm state */
@@ -671,22 +675,20 @@ int MDBalancer::mantle_prep_rebalance()
     return -ENOEXEC;
   }
 
+  /* balancer policies can use basic Lua functions */
+  luaopen_base(L);
+
   /* load the balancer */
   if (luaL_loadstring(L, script.c_str())) {
     dout(0) << "WARNING: mantle could not load balancer: "
-            << lua_error(L) << dendl;
+            << lua_tostring(L, -1) << dendl;
     lua_close(L);
     return -EINVAL;
   }
 
-  /* setup debugging */
+  /* setup debugging and put metrics into a table */
   lua_register(L, "BAL_LOG", dout_wrapper);
-
-  /* put metrics into a table in Lua */
-  mantle_expose_metrics(L);
-
-  /* balancer policies can use basic Lua functions */
-  luaopen_base(L);
+  mantle_push_metrics(L);
 
   /* compile/execute balancer */
   int ret = lua_pcall(L, 0, LUA_MULTRET, 0);
@@ -694,7 +696,7 @@ int MDBalancer::mantle_prep_rebalance()
   #define dout_prefix *_dout << "mds." << mds->get_nodeid() << ".bal "
 
   if (ret) {
-    dout(0) << "WARNING: mantle could not execute script: " 
+    dout(0) << "WARNING: mantle could not execute script: "
             << lua_tostring(L, -1) << dendl;
     lua_close(L);
     return -EINVAL;

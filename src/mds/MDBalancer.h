@@ -98,7 +98,7 @@ public:
 
   void export_empties();
 
-  void mantle_expose_metrics(lua_State *L);
+  void mantle_push_metrics(lua_State *L);
   //set up the rebalancing targets for export and do one if the
   //MDSMap is up to date
   void prep_rebalance(int beat);

@@ -829,3 +829,7 @@ if [ "$CEPH_DIR" != "$PWD" ]; then
     echo "export CEPH_CONF=$conf_fn"
     echo "export CEPH_KEYRING=$keyring_fn"
 fi
+
+./ceph mds set allow_multimds true --yes-i-really-mean-it; ./ceph mds set max_mds 5; for i in a b c; do ./ceph --admin-daemon out/mds.$i.asok config set debug_ms 0; ./ceph --admin-daemon out/mds.$i.asok config set debug_mds_balancer 10; done
+
+tail -f out/mds.a.log
