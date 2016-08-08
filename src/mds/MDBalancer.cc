@@ -660,77 +660,36 @@ void MDBalancer::mantle_push_metrics(lua_State *L) {
 
 int MDBalancer::mantle_prep_rebalance()
 {
+  int cluster_size = mds->get_mds_map()->get_num_in_mds();
+
   my_targets.clear();
   Mantle *mantle = new Mantle();
-  int ret = mantle->balance(mds, my_targets);
+
+  /* fill in the metrics for each mds by grabbing load struct */
+  vector < map<string, double> > metrics (cluster_size);
+  for (mds_rank_t i=mds_rank_t(0);
+       i < mds_rank_t(cluster_size);
+       i++) {
+    map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
+    std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
+    mds_load_t &load(r.first->second);
+
+    metrics[i].insert(make_pair("auth.meta_load", load.auth.meta_load()));
+    metrics[i].insert(make_pair("all.meta_load", load.all.meta_load()));
+    metrics[i].insert(make_pair("req_rate", load.req_rate));
+    metrics[i].insert(make_pair("queue_len", load.queue_len));
+    metrics[i].insert(make_pair("cpu_load_avg", load.cpu_load_avg));
+  }
+
+  dout(0) << "befor Mantle: targets=" << my_targets << dendl;
+  int ret = mantle->balance(metrics, my_targets);
+  dout(0) << "after Mantle: targets=" << my_targets << dendl;
+
   if (!ret)
     try_rebalance();
-  delete mantle;
   
+  delete mantle;
   return ret;
-
-
-//  //mantle->export_metrics();
-//
-//  /* load script from localfs */
-//  ifstream t("/tmp/test.lua");
-//  string script((std::istreambuf_iterator<char>(t)),
-//                 std::istreambuf_iterator<char>()); 
-//  my_targets.clear();
-//
-//  /* build lua vm state */
-//  lua_State *L = luaL_newstate(); 
-//  if (!L) {
-//    dout(0) << "WARNING: mantle could not load Lua state" << dendl;
-//    return -ENOEXEC;
-//  }
-//
-//  /* balancer policies can use basic Lua functions */
-//  luaopen_base(L);
-//
-//  /* load the balancer */
-//  if (luaL_loadstring(L, script.c_str())) {
-//    dout(0) << "WARNING: mantle could not load balancer: "
-//            << lua_tostring(L, -1) << dendl;
-//    lua_close(L);
-//    return -EINVAL;
-//  }
-//
-//  /* setup debugging and put metrics into a table */
-//  //lua_register(L, "BAL_LOG", dout_wrapper);
-//  mantle_push_metrics(L);
-//
-//  /* compile/execute balancer */
-//  int ret = lua_pcall(L, 0, LUA_MULTRET, 0);
-//  #undef dout_prefix
-//  #define dout_prefix *_dout << "mds." << mds->get_nodeid() << ".bal "
-//
-//  if (ret) {
-//    dout(0) << "WARNING: mantle could not execute script: "
-//            << lua_tostring(L, -1) << dendl;
-//    lua_close(L);
-//    return -EINVAL;
-//  }
-//
-//  if (lua_istable(L, -1) == 0 ||
-//      mds->get_mds_map()->get_num_in_mds() != lua_rawlen(L, -1)) {
-//    dout(0) << "WARNING: mantle script returned a malformed response" << dendl;
-//    lua_close(L);
-//    return -EINVAL;
-//  }
-//
-//  /* parse response by iterating over Lua stack */
-//  mds_rank_t it = mds_rank_t(0);
-//  lua_pushnil(L);
-//  while (lua_next(L, -2) != 0) {
-//    my_targets[it] = (lua_tointeger(L, -1));
-//    lua_pop(L, 1);
-//    it++;
-//  }
-//
-//  lua_close(L);
-//  try_rebalance();
-  return 0;
 }
 
 

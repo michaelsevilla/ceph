@@ -35,56 +35,8 @@ int dout_wrapper(lua_State *L)
   return 0;
 }
 
-
-
-void Mantle::push_metrics(lua_State *L) {
-  /* table to hold all metrics */
-  lua_newtable(L);
-
-  /* fill in the metrics for each mds by grabbing load struct */
-  for (mds_rank_t i=mds_rank_t(0);
-       i < mds_rank_t(mds->get_mds_map()->get_num_in_mds());
-       i++) {
-    map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
-    std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
-    mds_load_t &load(r.first->second);
-
-    /* this mds has an associated table of metrics */
-    lua_pushinteger(L, i);
-    lua_newtable(L);
-
-    /* push metric; setfield assigns key and pops the val */
-    lua_pushnumber(L, load.auth.meta_load());
-    lua_setfield(L, -2, "auth.meta_load");
-    lua_pushnumber(L, load.all.meta_load());
-    lua_setfield(L, -2, "all.meta_load");
-    lua_pushnumber(L, load.req_rate);
-    lua_setfield(L, -2, "req_rate");
-    lua_pushnumber(L, load.queue_len);
-    lua_setfield(L, -2, "queue_len");
-    lua_pushnumber(L, load.cpu_load_avg);
-    dout(0) << "cpu_load_avg=" << load.cpu_load_avg << dendl;
-    lua_setfield(L, -2, "cpu_load_avg");
-
-    /* in the table at at stack[-3], set k=stack[-1] to v=stack[-2] */
-    lua_rawset(L, -3);
-  }
-
-  /* global mds table exposed to Lua */
-  lua_setglobal(L, "mds");
-}
-
-
-
-int Mantle::balance(MDSRank *m, map<mds_rank_t,double> my_targets)
+int Mantle::balance(vector < map<string, double> > metrics, map<mds_rank_t,double> &my_targets)
 {
-  mds = m;
-
-  /* load script from localfs */
-  ifstream t("/tmp/test.lua");
-  string script((std::istreambuf_iterator<char>(t)),
-                 std::istreambuf_iterator<char>()); 
-
   /* build lua vm state */
   lua_State *L = luaL_newstate(); 
   if (!L) {
@@ -95,6 +47,11 @@ int Mantle::balance(MDSRank *m, map<mds_rank_t,double> my_targets)
   /* balancer policies can use basic Lua functions */
   luaopen_base(L);
 
+  /* load script from localfs */
+  ifstream t("/tmp/test.lua");
+  string script((std::istreambuf_iterator<char>(t)),
+                 std::istreambuf_iterator<char>()); 
+
   /* load the balancer */
   if (luaL_loadstring(L, script.c_str())) {
     dout(0) << "WARNING: mantle could not load balancer: "
@@ -103,9 +60,31 @@ int Mantle::balance(MDSRank *m, map<mds_rank_t,double> my_targets)
     return -EINVAL;
   }
 
-  /* setup debugging and put metrics into a table */
+  /* setup debugging */
   lua_register(L, "BAL_LOG", dout_wrapper);
-  push_metrics(L);
+
+  /* global mds table to hold all metrics */
+  lua_newtable(L);
+
+  /* push name of mds (i) and its table of metrics onto Lua stack */
+  for (unsigned i=0; i < metrics.size(); i++) {
+    lua_pushinteger(L, i);
+    lua_newtable(L);
+
+    /* push metrics into this mds's table; setfield assigns key/pops val */
+    for (map<string, double>::iterator it = metrics[i].begin();
+         it != metrics[i].end();
+         it++) {
+      lua_pushnumber(L, it->second);
+      lua_setfield(L, -2, it->first.c_str());
+    }
+
+    /* in global mds table at stack[-3], set k=stack[-1] to v=stack[-2] */
+    lua_rawset(L, -3);
+  }
+
+  /* set the name of the global mds table */
+  lua_setglobal(L, "mds");
 
   /* compile/execute balancer */
   int ret = lua_pcall(L, 0, LUA_MULTRET, 0);
@@ -118,7 +97,7 @@ int Mantle::balance(MDSRank *m, map<mds_rank_t,double> my_targets)
   }
 
   if (lua_istable(L, -1) == 0 ||
-      mds->get_mds_map()->get_num_in_mds() != lua_rawlen(L, -1)) {
+      metrics.size() != lua_rawlen(L, -1)) {
     dout(0) << "WARNING: mantle script returned a malformed response" << dendl;
     lua_close(L);
     return -EINVAL;
