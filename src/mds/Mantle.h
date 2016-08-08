@@ -20,9 +20,14 @@ class MonClient;
 
 class Mantle {
   protected:
+    lua_State *L;
     map<mds_rank_t, mds_load_t>  mds_load;
     void push_metrics(lua_State *L);
 
   public:
-    int balance(vector < map<string, double> > metrics, map<mds_rank_t,double> &my_targets);
+    Mantle() : L(NULL) {};
+    ~Mantle() { lua_close(L); };
+    int start();
+    void expose_metrics(string name, vector < map<string, double> > metrics);
+    int execute(map<mds_rank_t,double> &my_targets);
 };

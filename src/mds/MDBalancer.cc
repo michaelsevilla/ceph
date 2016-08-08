@@ -598,66 +598,6 @@ void MDBalancer::prep_rebalance(int beat)
 
 
 
-//int dout_wrapper(lua_State *L)
-//{
-//  #undef dout_prefix
-//  #define dout_prefix *_dout << "lua.balancer "
-//
-//  /* Lua indexes the stack from the bottom up */
-//  int bottom = -1 * lua_gettop(L);
-//  if (!lua_isinteger(L, bottom)) {
-//    dout(0) << "WARNING: BAL_LOG has no message" << dendl;
-//    return -EINVAL;
-//  }
-//
-//  /* bottom of the stack is the log level */
-//  int level = lua_tointeger(L, bottom);
-//
-//  /* rest of the stack is the message */
-//  string s = "";
-//  for (int i = bottom + 1; i < 0; i++)
-//    lua_isstring(L, i) ? s.append(lua_tostring(L, i)) : s.append("<empty>");
-//
-//  dout(level) << s << dendl;
-//  return 0;
-//}
-
-void MDBalancer::mantle_push_metrics(lua_State *L) {
-  /* table to hold all metrics */
-  lua_newtable(L);
-
-  /* fill in the metrics for each mds by grabbing load struct */
-  for (mds_rank_t i=mds_rank_t(0);
-       i < mds_rank_t(mds->get_mds_map()->get_num_in_mds());
-       i++) {
-    map<mds_rank_t, mds_load_t>::value_type val(i, mds_load_t(ceph_clock_now(g_ceph_context)));
-    std::pair < map<mds_rank_t, mds_load_t>::iterator, bool > r(mds_load.insert(val));
-    mds_load_t &load(r.first->second);
-
-    /* this mds has an associated table of metrics */
-    lua_pushinteger(L, i);
-    lua_newtable(L);
-
-    /* push metric; setfield assigns key and pops the val */
-    lua_pushnumber(L, load.auth.meta_load());
-    lua_setfield(L, -2, "auth.meta_load");
-    lua_pushnumber(L, load.all.meta_load());
-    lua_setfield(L, -2, "all.meta_load");
-    lua_pushnumber(L, load.req_rate);
-    lua_setfield(L, -2, "req_rate");
-    lua_pushnumber(L, load.queue_len);
-    lua_setfield(L, -2, "queue_len");
-    lua_pushnumber(L, load.cpu_load_avg);
-    lua_setfield(L, -2, "cpu_load_avg");
-
-    /* in the table at at stack[-3], set k=stack[-1] to v=stack[-2] */
-    lua_rawset(L, -3);
-  }
-
-  /* global mds table exposed to Lua */
-  lua_setglobal(L, "mds");
-}
-
 int MDBalancer::mantle_prep_rebalance()
 {
   int cluster_size = mds->get_mds_map()->get_num_in_mds();
@@ -682,7 +622,8 @@ int MDBalancer::mantle_prep_rebalance()
   }
 
   dout(0) << "befor Mantle: targets=" << my_targets << dendl;
-  int ret = mantle->balance(metrics, my_targets);
+  mantle->expose_metrics("mds", metrics);
+  int ret = mantle->execute(my_targets);
   dout(0) << "after Mantle: targets=" << my_targets << dendl;
 
   if (!ret)

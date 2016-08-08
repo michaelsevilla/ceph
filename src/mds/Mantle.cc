@@ -35,7 +35,7 @@ int dout_wrapper(lua_State *L)
   return 0;
 }
 
-int Mantle::balance(vector < map<string, double> > metrics, map<mds_rank_t,double> &my_targets)
+int Mantle::start()
 {
   /* build lua vm state */
   lua_State *L = luaL_newstate(); 
@@ -47,31 +47,23 @@ int Mantle::balance(vector < map<string, double> > metrics, map<mds_rank_t,doubl
   /* balancer policies can use basic Lua functions */
   luaopen_base(L);
 
-  /* load script from localfs */
-  ifstream t("/tmp/test.lua");
-  string script((std::istreambuf_iterator<char>(t)),
-                 std::istreambuf_iterator<char>()); 
-
-  /* load the balancer */
-  if (luaL_loadstring(L, script.c_str())) {
-    dout(0) << "WARNING: mantle could not load balancer: "
-            << lua_tostring(L, -1) << dendl;
-    lua_close(L);
-    return -EINVAL;
-  }
-
   /* setup debugging */
   lua_register(L, "BAL_LOG", dout_wrapper);
 
-  /* global mds table to hold all metrics */
+  return 0;
+}
+
+void Mantle::expose_metrics(string name, vector < map<string, double> > metrics)
+{
+  /* global mds metrics to hold all dictionaries */
   lua_newtable(L);
 
-  /* push name of mds (i) and its table of metrics onto Lua stack */
+  /* push name of mds (i) and its metrics onto Lua stack */
   for (unsigned i=0; i < metrics.size(); i++) {
     lua_pushinteger(L, i);
     lua_newtable(L);
 
-    /* push metrics into this mds's table; setfield assigns key/pops val */
+    /* push values into this mds's table; setfield assigns key/pops val */
     for (map<string, double>::iterator it = metrics[i].begin();
          it != metrics[i].end();
          it++) {
@@ -84,7 +76,22 @@ int Mantle::balance(vector < map<string, double> > metrics, map<mds_rank_t,doubl
   }
 
   /* set the name of the global mds table */
-  lua_setglobal(L, "mds");
+  lua_setglobal(L, name.c_str());
+}
+
+int Mantle::execute(map<mds_rank_t,double> &my_targets)
+{
+  /* load script from localfs */
+  ifstream t("/tmp/test.lua");
+  string script((std::istreambuf_iterator<char>(t)),
+                 std::istreambuf_iterator<char>()); 
+
+  /* load the balancer */
+  if (luaL_loadstring(L, script.c_str())) {
+    dout(0) << "WARNING: mantle could not load balancer: "
+            << lua_tostring(L, -1) << dendl;
+    return -EINVAL;
+  }
 
   /* compile/execute balancer */
   int ret = lua_pcall(L, 0, LUA_MULTRET, 0);
@@ -96,8 +103,7 @@ int Mantle::balance(vector < map<string, double> > metrics, map<mds_rank_t,doubl
     return -EINVAL;
   }
 
-  if (lua_istable(L, -1) == 0 ||
-      metrics.size() != lua_rawlen(L, -1)) {
+  if (lua_istable(L, -1) == 0) {
     dout(0) << "WARNING: mantle script returned a malformed response" << dendl;
     lua_close(L);
     return -EINVAL;
@@ -111,8 +117,6 @@ int Mantle::balance(vector < map<string, double> > metrics, map<mds_rank_t,doubl
     lua_pop(L, 1);
     it++;
   }
-
-  lua_close(L);
 
   return 0;
 }
