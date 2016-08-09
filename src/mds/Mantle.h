@@ -22,11 +22,15 @@ class Mantle {
   protected:
     lua_State *L;
     map<mds_rank_t, mds_load_t>  mds_load;
-    void push_metrics(lua_State *L);
 
   public:
     Mantle() : L(NULL) {};
-    ~Mantle() { lua_close(L); };
+    ~Mantle() 
+    {
+      if (L == NULL) 
+        return;
+      lua_close(L);
+    };
     int start();
     void expose_metrics(string name, vector < map<string, double> > metrics);
     int execute(map<mds_rank_t,double> &my_targets);

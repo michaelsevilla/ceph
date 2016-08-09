@@ -622,6 +622,7 @@ int MDBalancer::mantle_prep_rebalance()
   }
 
   dout(0) << "befor Mantle: targets=" << my_targets << dendl;
+  mantle->start();
   mantle->expose_metrics("mds", metrics);
   int ret = mantle->execute(my_targets);
   dout(0) << "after Mantle: targets=" << my_targets << dendl;

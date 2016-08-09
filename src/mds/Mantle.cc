@@ -38,7 +38,7 @@ int dout_wrapper(lua_State *L)
 int Mantle::start()
 {
   /* build lua vm state */
-  lua_State *L = luaL_newstate(); 
+  L = luaL_newstate(); 
   if (!L) {
     dout(0) << "WARNING: mantle could not load Lua state" << dendl;
     return -ENOEXEC;
@@ -55,6 +55,9 @@ int Mantle::start()
 
 void Mantle::expose_metrics(string name, vector < map<string, double> > metrics)
 {
+  if (L == NULL)
+    return;
+
   /* global mds metrics to hold all dictionaries */
   lua_newtable(L);
 
@@ -81,6 +84,11 @@ void Mantle::expose_metrics(string name, vector < map<string, double> > metrics)
 
 int Mantle::execute(map<mds_rank_t,double> &my_targets)
 {
+  if (L == NULL) {
+    dout(0) << "ERROR: mantle was not started" << dendl;
+    return -ENOENT;
+  }
+
   /* load script from localfs */
   ifstream t("/tmp/test.lua");
   string script((std::istreambuf_iterator<char>(t)),
@@ -99,13 +107,11 @@ int Mantle::execute(map<mds_rank_t,double> &my_targets)
   if (ret) {
     dout(0) << "WARNING: mantle could not execute script: "
             << lua_tostring(L, -1) << dendl;
-    lua_close(L);
     return -EINVAL;
   }
 
   if (lua_istable(L, -1) == 0) {
     dout(0) << "WARNING: mantle script returned a malformed response" << dendl;
-    lua_close(L);
     return -EINVAL;
   }
 
