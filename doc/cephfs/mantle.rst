@@ -81,6 +81,9 @@ Mantle with `vstart.sh`
      ./ceph-fuse /cephfs -o allow_other &
      tail -f out/mds.a.log
 
+   Note that if you look at the last MDS (which could be a, b, or c -- it's
+   random), you will see an an attempt to index a nil value. This is because the
+   last MDS tries to check the load of its neighbor, which does not exist.
 
 5. Run a simple benchmark. In our case, we use the Docker mdtest image to
    create load. Assuming that CephFS is mounted in the first container, we can

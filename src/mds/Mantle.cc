@@ -18,7 +18,7 @@ int dout_wrapper(lua_State *L)
 
   /* Lua indexes the stack from the bottom up */
   int bottom = -1 * lua_gettop(L);
-  if (!lua_isinteger(L, bottom)) {
+  if (!lua_isinteger(L, bottom) || bottom == 0) {
     dout(0) << "WARNING: BAL_LOG has no message" << dendl;
     return -EINVAL;
   }
@@ -128,6 +128,11 @@ int Mantle::balance(string script, mds_rank_t whoami, vector < map<string, doubl
   mds_rank_t it = mds_rank_t(0);
   lua_pushnil(L);
   while (lua_next(L, -2) != 0) {
+    if (!lua_isnumber(L, -1)) {
+      dout(0) << "WARNING: mantle script returned a malformed response" << dendl;
+      lua_close(L);
+      return -EINVAL;
+    }
     my_targets[it] = (lua_tonumber(L, -1));
     lua_pop(L, 1);
     it++;

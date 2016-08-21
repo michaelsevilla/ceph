@@ -171,7 +171,7 @@ mds_load_t MDBalancer::get_load(utime_t now)
   return load;
 }
 
-void MDBalancer::localize_balancer(string const balancer)
+int MDBalancer::localize_balancer(string const balancer)
 {
   int64_t pool_id = mds->mdsmap->get_metadata_pool();
   string fname = "/tmp/" + balancer;
@@ -190,6 +190,7 @@ void MDBalancer::localize_balancer(string const balancer)
     dout(0) << "tick could not find balancer " << balancer
             << " in RADOS: " << cpp_strerror(r) << dendl;
   }
+  return r;
 }
 
 void MDBalancer::send_heartbeat()
@@ -299,8 +300,17 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
     if (mds_load.size() == cluster_size) {
       // let's go!
       //export_empties();  // no!
-      if (!mantle_prep_rebalance())
+
+      int r = mantle_prep_rebalance();
+      if (!r) {
+        mds->clog->info() << "mantle succeeded; "
+                          << "balancer=" << mds->mdsmap->get_balancer();
         return;
+      }
+
+      mds->clog->warn() << "mantle failed (falling back to original balancer); "
+                        << "balancer=" << mds->mdsmap->get_balancer()
+                        << " : " << cpp_strerror(r);
       prep_rebalance(m->get_beat());
     }
   }
@@ -621,10 +631,9 @@ int MDBalancer::mantle_prep_rebalance()
 {
   /* pull metadata balancer from RADOS */
   string const balancer = mds->mdsmap->get_balancer();
-  localize_balancer(balancer);
-  ifstream f("/tmp/" + balancer);
-  if (!f.is_open())
+  if (balancer == "" || localize_balancer(balancer))
     return -ENOENT;
+  ifstream f("/tmp/" + balancer);
   string script((istreambuf_iterator<char>(f)),
                  istreambuf_iterator<char>());
 
@@ -658,9 +667,14 @@ int MDBalancer::mantle_prep_rebalance()
   delete mantle;
   dout(2) << " mantle decided that new targets=" << my_targets << dendl;
 
-  if (!ret)
-    try_rebalance();
-  return ret;
+  /* mantle doesn't know about cluster size, so check target len here */
+  if ((int) my_targets.size() != cluster_size)
+    return -EINVAL;
+  else if (ret)
+    return ret;
+
+  try_rebalance();
+  return 0;
 }
 
 
