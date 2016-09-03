@@ -31,6 +31,7 @@ using namespace std;
 #include "msg/Messenger.h"
 
 #include "common/Timer.h"
+#include "common/TracepointProvider.h"
 #include "common/ceph_argparse.h"
 #include "common/pick_address.h"
 
@@ -47,6 +48,13 @@ using namespace std;
 #include "include/assert.h"
 
 #define dout_subsys ceph_subsys_mds
+
+namespace {
+
+TracepointProvider::Traits mds_tracepoint_traits("libmds_tp.so",
+                                                 "mds_tracing");
+
+} // anonymous namespace
 
 void usage()
 {
@@ -174,6 +182,8 @@ int main(int argc, const char **argv)
 
   global_init_daemonize(g_ceph_context);
   common_init_finish(g_ceph_context);
+
+  TracepointProvider::initialize<mds_tracepoint_traits>(g_ceph_context);
 
   // get monmap
   MonClient mc(g_ceph_context);

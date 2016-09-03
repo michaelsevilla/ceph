@@ -70,6 +70,17 @@ using namespace std;
 #undef dout_prefix
 #define dout_prefix *_dout << "mds." << mds->get_nodeid() << ".server "
 
+#ifdef WITH_LTTNG
+#define TRACEPOINT_DEFINE
+#define TRACEPOINT_PROBE_DYNAMIC_LINKAGE
+#include "tracing/mds.h"
+#undef TRACEPOINT_PROBE_DYNAMIC_LINKAGE
+#undef TRACEPOINT_DEFINE
+#else
+#define tracepoint(...)
+#endif
+
+
 
 class ServerContext : public MDSInternalContextBase {
   protected:
@@ -1086,6 +1097,9 @@ void Server::early_reply(MDRequestRef& mdr, CInode *tracei, CDentry *tracedn)
 
   mdr->did_early_reply = true;
 
+  tracepoint(   mds, req_early_replied, this,
+                mdr->client_request->get_op(),
+                mdr->client_request->get_reqid().tid);
   mds->logger->inc(l_mds_reply);
   utime_t lat = ceph_clock_now(g_ceph_context) - mdr->client_request->get_recv_stamp();
   mds->logger->tinc(l_mds_reply_latency, lat);
@@ -1142,6 +1156,9 @@ void Server::reply_client_request(MDRequestRef& mdr, MClientReply *reply)
   if (!did_early_reply && !is_replay) {
 
     mds->logger->inc(l_mds_reply);
+    tracepoint( mds, req_replied, this,
+                mdr->client_request->get_op(),
+                mdr->client_request->get_reqid().tid);
     utime_t lat = ceph_clock_now(g_ceph_context) - mdr->client_request->get_recv_stamp();
     mds->logger->tinc(l_mds_reply_latency, lat);
     dout(20) << "lat " << lat << dendl;
@@ -1318,6 +1335,9 @@ void Server::handle_client_request(MClientRequest *req)
 {
   dout(4) << "handle_client_request " << *req << dendl;
 
+  tracepoint(   mds, req_received, this,
+                req->get_op(),
+                req->get_reqid().tid);
   if (mds->logger)
     mds->logger->inc(l_mds_request);
   if (logger)
