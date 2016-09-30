@@ -1,6 +1,11 @@
 Mantle
 ======
 
+*** Centralized log messages (doesn't spam ceph-w); needed for integration tests
+    - need to say something about forcing all MDSs to re-pull from RADOS
+*** Blocking pulls from RADOS
+*** Requires object with balancer (version) in metadata pool
+
 Multiple, active MDSs can migrate directories to balance metadata load. The
 policies for when, where, and how much to migrate are hard-coded into the
 metadata balancing module. Mantle is a programmable metadata balancer built
@@ -54,8 +59,7 @@ Mantle with `vstart.sh`
     ./vstart.sh -n -l
     for i in a b c; do 
       ./ceph --admin-daemon out/mds.$i.asok config set debug_ms 0
-      ./ceph --admin-daemon out/mds.$i.asok config set debug_mds 0
-      ./ceph --admin-daemon out/mds.$i.asok config set debug_mds_balancer 2
+      ./ceph --admin-daemon out/mds.$i.asok config set debug_mds 2
       ./ceph --admin-daemon out/mds.$i.asok config set mds_beacon_grace 1500
     done
 
@@ -73,7 +77,7 @@ Mantle with `vstart.sh`
 
     ./ceph mds set allow_multimds true --yes-i-really-mean-it
     ./ceph mds set max_mds 5
-    ./ceph mds set balancer greedyspill.lua
+    ./ceph fs set cephfs_a balancer greedyspill.lua
 
 
 4. Mount CephFS in another window:
@@ -89,8 +93,7 @@ Mantle with `vstart.sh`
    last MDS tries to check the load of its neighbor, which does not exist.
 
 5. Run a simple benchmark. In our case, we use the Docker mdtest image to
-   create load. Assuming that CephFS is mounted in the first container, we can
-   share the mount and run 3 clients using: 
+   create load:
 
 ::
 

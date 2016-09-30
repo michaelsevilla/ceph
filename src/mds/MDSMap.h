@@ -290,7 +290,7 @@ public:
   mds_rank_t get_max_mds() const { return max_mds; }
   void set_max_mds(mds_rank_t m) { max_mds = m; }
 
-  std::string get_balancer() const { return balancer; }
+  const std::string get_balancer() const { return balancer; }
   void set_balancer(std::string val) { balancer.assign(val); }
 
   mds_rank_t get_tableserver() const { return tableserver; }
