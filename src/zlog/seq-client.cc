@@ -64,8 +64,8 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
   int fd = ceph_open(cmount, path.c_str(), O_CREAT|O_RDWR, 0600);
   assert(fd >= 0);
 
-  int r = ceph_set_lseek_target(cmount, fd);
-  assert(r == 0);
+  //int r = ceph_set_lseek_target(cmount, fd);
+  //assert(r == 0);
 
   // hold the file open but don't do anything
   if (idle) {
@@ -246,8 +246,8 @@ int main(int argc, char **argv)
 
   stop = 0;
 
-  if (capdelay > 0.0)
-    ceph_set_cap_handle_delay(cmount, capdelay);
+  //if (capdelay > 0.0)
+  //  ceph_set_cap_handle_delay(cmount, capdelay);
 
   /*
    * Start workload
