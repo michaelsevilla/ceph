@@ -272,10 +272,6 @@ Client::Client(Messenger *m, MonClient *mc)
 
   num_flushing_caps = 0;
 
-  cap_handle_delay = 0.0;
-  lseek_spins = 0;
-  plug_handle_cap = false;
-
   _dir_vxattrs_name_size = _vxattrs_calcu_name_size(_dir_vxattrs);
   _file_vxattrs_name_size = _vxattrs_calcu_name_size(_file_vxattrs);
 
@@ -478,26 +474,9 @@ void Client::dump_status(Formatter *f)
   }
 }
 
-class C_C_UnplugHandleCaps : public Context {
-  Client *client;
-public:
-  explicit C_C_UnplugHandleCaps(Client *c) : client(c) {}
-  void finish(int r) {
-    assert(client->client_lock.is_locked_by_me());
-    while (!client->delayed_handle_caps.empty()) {
-      auto m = client->delayed_handle_caps.front();
-      client->delayed_handle_caps.pop_front();
-      client->handle_caps(m);
-    }
-    client->plug_handle_cap = false;
-  }
-};
-
-
 int Client::init()
 {
   timer.init();
-
   objectcacher->start();
   objecter->init();
 
@@ -2392,30 +2371,7 @@ void Client::handle_osd_map(MOSDMap *m)
 
 // ------------------------
 // incoming messages
-//
 
-int Client::set_lseek_target(int fd)
-{
-  Mutex::Locker lock(client_lock);
-
-  Fh *f = get_filehandle(fd);
-  if (!f)
-    return -EBADF;
-
-  Inode *in = f->inode.get();
-
-  lseek_target = in->ino;
-
-  return 0;
-}
-
-void Client::set_cap_handle_delay(double delay)
-{
-  Mutex::Locker l(client_lock);
-  cap_handle_delay = delay;
-  lseek_spins = 0;
-  plug_handle_cap = false;
-}
 
 bool Client::ms_dispatch(Message *m)
 {
@@ -2454,19 +2410,7 @@ bool Client::ms_dispatch(Message *m)
     handle_snap(static_cast<MClientSnap*>(m));
     break;
   case CEPH_MSG_CLIENT_CAPS:
-    {
-      auto mm = static_cast<MClientCaps*>(m);
-
-      //inodeno_t target = 1099511627778ULL;
-      inodeno_t target = lseek_target;
-      bool is_target = (mm->get_ino() == target) && (mm->get_caps() == 2133);
-
-      if (target > 0 && plug_handle_cap && is_target && cap_handle_delay > 0.0) {
-        delayed_handle_caps.push_back(mm);
-      } else {
-        handle_caps(static_cast<MClientCaps*>(m));
-      }
-    }
+    handle_caps(static_cast<MClientCaps*>(m));
     break;
   case CEPH_MSG_CLIENT_LEASE:
     handle_lease(static_cast<MClientLease*>(m));
@@ -5688,6 +5632,8 @@ void Client::unmount()
   ldout(cct, 2) << "unmounted." << dendl;
 }
 
+
+
 class C_C_Tick : public Context {
   Client *client;
 public:
@@ -7804,16 +7750,6 @@ int Client::close(int fd)
   tout(cct) << "close" << std::endl;
   tout(cct) << fd << std::endl;
 
-  // hack: shut it all down
-  cap_handle_delay = 0.0;
-  lseek_spins = 0;
-  plug_handle_cap = false;
-  while (!delayed_handle_caps.empty()) {
-    auto m = delayed_handle_caps.front();
-    delayed_handle_caps.pop_front();
-    handle_caps(m);
-  }
-
   Fh *fh = get_filehandle(fd);
   if (!fh)
     return -EBADF;
@@ -7850,28 +7786,6 @@ loff_t Client::_lseek(Fh *f, loff_t offset, int whence)
 {
   Inode *in = f->inode.get();
   int r;
-
-  if (cap_handle_delay > 0.0) {
-    // if we don't have the cap, then drain anything pending, and let
-    // everything new through the door.
-    bool has_cap = in->caps_issued_mask(CEPH_STAT_CAP_SIZE);
-    if (!has_cap) {
-      while (!delayed_handle_caps.empty()) {
-        auto m = delayed_handle_caps.front();
-        delayed_handle_caps.pop_front();
-        handle_caps(m);
-      }
-      plug_handle_cap = false;
-      lseek_spins = 0;
-    } else {
-      lseek_spins++;
-      if (lseek_spins == 10) {
-        plug_handle_cap = true;
-        auto e = new C_C_UnplugHandleCaps(this);
-        timer.add_event_after(cap_handle_delay, e);
-      }
-    }
-  }
 
   switch (whence) {
   case SEEK_SET:
