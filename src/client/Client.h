@@ -1045,7 +1045,7 @@ public:
   int fake_write_size(int fd, loff_t size);
   int ftruncate(int fd, loff_t size);
   int fsync(int fd, bool syncdataonly);
-  int fstat(int fd, struct stat *stbuf, int mask=CEPH_STAT_CAP_INODE_ALL);
+  int fstat(int fd, struct stat *stbuf);
   int fstatx(int fd, struct ceph_statx *stx, unsigned int want, unsigned int flags);
   int fallocate(int fd, int mode, loff_t offset, loff_t length);
 
