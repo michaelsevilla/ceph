@@ -262,6 +262,9 @@ Client::Client(Messenger *m, MonClient *mc)
 
   num_flushing_caps = 0;
 
+  cap_handle_delay = 0.0;
+  plug_handle_cap = false;
+
   _dir_vxattrs_name_size = _vxattrs_calcu_name_size(_dir_vxattrs);
   _file_vxattrs_name_size = _vxattrs_calcu_name_size(_file_vxattrs);
 
@@ -465,6 +468,21 @@ void Client::dump_status(Formatter *f)
     f->dump_int("osd_epoch_barrier", cap_epoch_barrier);
   }
 }
+
+class C_C_UnplugHandleCaps : public Context {
+  Client *client;
+public:
+  explicit C_C_UnplugHandleCaps(Client *c) : client(c) {}
+  void finish(int r) {
+    assert(client->client_lock.is_locked_by_me());
+    while (!client->delayed_handle_caps.empty()) {
+      auto m = client->delayed_handle_caps.front();
+      client->delayed_handle_caps.pop_front();
+      client->handle_caps(m);
+    }
+    client->plug_handle_cap = false;
+  }
+};
 
 int Client::init()
 {
@@ -2416,6 +2434,27 @@ void Client::handle_osd_map(MOSDMap *m)
 // ------------------------
 // incoming messages
 
+int Client::set_lseek_target(int fd)
+{
+  Mutex::Locker lock(client_lock);
+
+  Fh *f = get_filehandle(fd);
+  if (!f)
+    return -EBADF;
+
+  Inode *in = f->inode.get();
+
+  lseek_target = in->ino;
+
+  return 0;
+}
+
+void Client::set_cap_handle_delay(double delay)
+{
+  Mutex::Locker l(client_lock);
+  cap_handle_delay = delay;
+  plug_handle_cap = false;
+}
 
 bool Client::ms_dispatch(Message *m)
 {
@@ -2457,7 +2496,18 @@ bool Client::ms_dispatch(Message *m)
     handle_snap(static_cast<MClientSnap*>(m));
     break;
   case CEPH_MSG_CLIENT_CAPS:
-    handle_caps(static_cast<MClientCaps*>(m));
+    {
+      auto mm = static_cast<MClientCaps*>(m);
+
+      inodeno_t target = lseek_target;
+      bool is_target = (mm->get_ino() == target) && (mm->get_caps() == 2133);
+
+      if (target > 0 && plug_handle_cap && is_target && cap_handle_delay > 0.0) {
+        delayed_handle_caps.push_back(mm);
+      } else {
+        handle_caps(static_cast<MClientCaps*>(m));
+      }
+    }
     break;
   case CEPH_MSG_CLIENT_LEASE:
     handle_lease(static_cast<MClientLease*>(m));
@@ -8087,6 +8137,18 @@ int Client::close(int fd)
   Fh *fh = get_filehandle(fd);
   if (!fh)
     return -EBADF;
+
+  Inode *in = fh->inode.get();
+  if (lseek_target > 0 && in->ino == lseek_target) { // is this the seq inode ?
+    cap_handle_delay = 0.0;
+    plug_handle_cap = false;
+    while (!delayed_handle_caps.empty()) {
+      auto m = delayed_handle_caps.front();
+      delayed_handle_caps.pop_front();
+      handle_caps(m);
+    }
+  }
+
   int err = _release_fh(fh);
   fd_map.erase(fd);
   put_fd(fd);
@@ -8120,6 +8182,56 @@ loff_t Client::_lseek(Fh *f, loff_t offset, int whence)
 {
   Inode *in = f->inode.get();
   int r;
+
+  /*
+   * When we get the capability we want to begin counting the number of
+   * operations the client is performing, as well as the amount of time the
+   * client is holding onto the capability. The challenge is in knowning when
+   * we have acquired the cap.
+   *
+   * One way is to go find all of the points in the client where the caps are
+   * updated. This was our first attempt but it was a little complicated not
+   * understanding a lot of the different code paths.
+   *
+   * Instead we choose a point in the code where we can identify a point where
+   * we did not have the cap and we block until we receive the cap. That point
+   * is here, as we must block until we have the stat size cap.
+   */
+  if (cap_handle_delay > 0.0) { // are we even trying to introduce delay ?
+    if (lseek_target > 0 && in->ino == lseek_target) { // is this the seq inode ?
+      bool has_cap = in->caps_issued_mask(CEPH_STAT_CAP_SIZE);
+      if (!has_cap) { // we need to get the cap and then start time slice
+
+        // first handle any caps that may be pending
+        while (!delayed_handle_caps.empty()) {
+          auto m = delayed_handle_caps.front();
+          delayed_handle_caps.pop_front();
+          handle_caps(m);
+        }
+
+        // make sure the gears are oiled
+        plug_handle_cap = false;
+
+        // go get the cap
+        MetaRequest *req = new MetaRequest(CEPH_MDS_OP_GETATTR);
+        filepath path;
+        in->make_nosnap_relative_path(path);
+        req->set_filepath(path);
+        req->set_inode(in);
+        req->head.args.getattr.mask = CEPH_STAT_CAP_SIZE;
+        int res = make_request(req, -1, -1);
+        if (res < 0)
+          return res;
+
+        assert(in->caps_issued_mask(CEPH_STAT_CAP_SIZE));
+
+        // block the caps for the specified delay
+        plug_handle_cap = true;
+        auto e = new C_C_UnplugHandleCaps(this);
+        timer.add_event_after(cap_handle_delay, e);
+      }
+    }
+  }
 
   switch (whence) {
   case SEEK_SET:

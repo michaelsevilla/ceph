@@ -509,6 +509,7 @@ add_library(rados_snap_set_diff_obj OBJECT librados/snap_set_diff.cc)
 add_subdirectory(include)
 add_subdirectory(librados)
 add_subdirectory(libradosstriper)
+add_subdirectory(zlog)
 
 set(librados_config_srcs
   librados-config.cc)

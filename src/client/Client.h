@@ -404,6 +404,9 @@ public:
   entity_name_t get_myname() { return messenger->get_myname(); } 
   void sync_write_commit(InodeRef& in);
 
+  void set_cap_handle_delay(double delay);
+  int set_lseek_target(int fd);
+
 protected:
   Filer                 *filer;     
   ObjectCacher          *objectcacher;
@@ -504,6 +507,7 @@ protected:
   friend class C_Client_RequestInterrupt;
   friend class C_Client_Remount;
   friend void intrusive_ptr_release(Inode *in);
+  friend class C_C_UnplugHandleCaps;
 
   //int get_cache_size() { return lru.lru_get_size(); }
   //void set_cache_size(int m) { lru.lru_set_max(m); }
@@ -716,6 +720,17 @@ protected:
   // ----------------------
   // fs ops.
 private:
+
+  bool plug_handle_cap;
+  double cap_handle_delay;
+  std::list<MClientCaps*> delayed_handle_caps;
+
+  /*
+   * this is the inode for the file representing the sequencer. ideally we
+   * implement this as an "inode type" but this is far easier than modifying
+   * the inode and network serialization stuff.
+   */
+  inodeno_t lseek_target = 0;
 
   void fill_dirent(struct dirent *de, const char *name, int type, uint64_t ino, loff_t next_off);
 
