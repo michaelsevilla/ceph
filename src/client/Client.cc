@@ -9122,16 +9122,16 @@ int Client::_fsync(Fh *f, bool syncdataonly)
   return _fsync(f->inode.get(), syncdataonly);
 }
 
-int Client::fstat(int fd, struct stat *stbuf, int mask)
+int Client::fstat(int fd, struct stat *stbuf)
 {
   Mutex::Locker lock(client_lock);
-  tout(cct) << "fstat mask " << hex << mask << dec << std::endl;
+  tout(cct) << "fstat" << std::endl;
   tout(cct) << fd << std::endl;
 
   Fh *f = get_filehandle(fd);
   if (!f)
     return -EBADF;
-  int r = _getattr(f->inode, mask);
+  int r = _getattr(f->inode, -1);
   if (r < 0)
     return r;
   fill_stat(f->inode, stbuf, NULL);
