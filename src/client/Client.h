@@ -413,6 +413,7 @@ public:
   void sync_write_commit(InodeRef& in);
 
   void set_cap_handle_delay(double delay);
+  void set_cap_handle_count(double count);
   int set_lseek_target(int fd);
 
 protected:
@@ -451,6 +452,7 @@ protected:
   uint64_t lseek_spins;
   bool plug_handle_cap;
   double cap_handle_delay;
+  double cap_handle_count;
   std::list<MClientCaps*> delayed_handle_caps;
   inodeno_t lseek_target = 0;
 

@@ -40,8 +40,9 @@ static void sigint_handler(int sig)
 
 // <start, latency>
 static std::vector<std::pair<uint64_t, uint64_t>> latencies;
+static std::vector<uint64_t> requests;
 
-static void run(struct ceph_mount_info *cmount, std::string filename, bool idle, bool record_latency)
+static void run(struct ceph_mount_info *cmount, std::string filename, bool idle, bool record_latency, std::string op)
 {
   int ret = ceph_mkdir(cmount, "/seqdir", 0755);
   if (ret && ret != -EEXIST) {
@@ -82,10 +83,15 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
 
   for (;;) {
     uint64_t start = getns();
-    //struct stat st;
-    //int ret = ceph_stat(cmount, path.c_str(), &st);
-    //int ret = ceph_fstat(cmount, fd, &st);
-    int64_t ret = ceph_lseek(cmount, fd, 0, SEEK_END);
+    requests.push_back(start);
+    struct stat st;
+    int ret = 0;
+    if (op == "stat")
+      ret = ceph_stat(cmount, path.c_str(), &st);
+    else if (op == "fstat")
+      ret = ceph_fstat(cmount, fd, &st);
+    else
+      ret = ceph_lseek(cmount, fd, 0, SEEK_END);
     uint64_t latency = getns() - start;
     assert(ret == 0);
 
@@ -110,6 +116,24 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
   }
 
   ceph_close(cmount, fd);
+}
+
+static void dump_request(std::string file)
+{
+  if (file.size() == 0)
+    return;
+
+  /*
+   * output
+   */
+  int fd = 0;
+  fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0644);
+  assert(fd > 0);
+  for (auto it = requests.begin(); it != requests.end(); it++) {
+    dprintf(fd, "%llu\n", (unsigned long long)(*it));
+  }
+  fsync(fd);
+  close(fd);
 }
 
 static void dump_latency(std::string file)
@@ -205,18 +229,24 @@ int main(int argc, char **argv)
   int report_period;
   int runtime_sec;
   std::string perf_file;
+  std::string reqs_file;
   std::string filename;
   bool idle;
   double capdelay;
+  double capcount;
+  std::string op;
 
   po::options_description desc("Allowed options");
   desc.add_options()
     ("report-sec", po::value<int>(&report_period)->default_value(5), "Report sec")
     ("runtime", po::value<int>(&runtime_sec)->default_value(30), "Runtime sec")
     ("perf_file", po::value<std::string>(&perf_file)->default_value(""), "Perf file")
+    ("reqs_file", po::value<std::string>(&reqs_file)->default_value(""), "Reqs file")
+    ("op", po::value<std::string>(&op)->default_value(""), "Operation")
     ("filename", po::value<std::string>(&filename)->default_value("seq"), "Filename")
     ("idle", po::value<bool>(&idle)->default_value(false), "Idle")
     ("capdelay", po::value<double>(&capdelay)->default_value(0.0), "cap delay")
+    ("capcount", po::value<double>(&capcount)->default_value(-1), "cap count")
   ;
 
   po::variables_map vm;
@@ -240,7 +270,11 @@ int main(int argc, char **argv)
   if (perf_file.size())
     latencies.reserve(20000000);
 
+  if (reqs_file.size())
+    requests.reserve(20000000);
+
   std::cout << "Running for " << runtime_sec << " seconds" << std::endl;
+  std::cout << "op " << op << "; capdelay " << capdelay <<  "; capcount " << capcount << std::endl;
 
   assert(signal(SIGINT, sigint_handler) != SIG_ERR);
 
@@ -248,12 +282,14 @@ int main(int argc, char **argv)
 
   if (capdelay > 0.0)
     ceph_set_cap_handle_delay(cmount, capdelay);
+  if (capcount != -1)
+    ceph_set_cap_handle_count(cmount, capcount);
 
   /*
    * Start workload
    */
   std::thread runner{[&] {
-    run(cmount, filename, idle, perf_file.size() > 0);
+    run(cmount, filename, idle, perf_file.size() > 0, op);
   }};
 
   std::thread reporter{[&] {
@@ -267,6 +303,7 @@ int main(int argc, char **argv)
   reporter.join();
 
   dump_latency(perf_file);
+  dump_request(reqs_file);
 
   /*
    * Clean-up connections...
