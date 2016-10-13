@@ -8253,7 +8253,7 @@ loff_t Client::_lseek(Fh *f, loff_t offset, int whence)
     assert(0);
   }
 
-  ldout(cct, 3) << "_lseek(" << f << ", " << offset << ", " << whence << ") = " << f->pos << dendl;
+  //ldout(cct, 3) << "_lseek(" << f << ", " << offset << ", " << whence << ") = " << f->pos << dendl;
   return f->pos;
 }
 
