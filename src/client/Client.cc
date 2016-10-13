@@ -273,6 +273,7 @@ Client::Client(Messenger *m, MonClient *mc)
   num_flushing_caps = 0;
 
   cap_handle_delay = 0.0;
+  cap_handle_count = -1;
   lseek_spins = 0;
   plug_handle_cap = false;
 
@@ -480,14 +481,17 @@ void Client::dump_status(Formatter *f)
 
 class C_C_UnplugHandleCaps : public Context {
   Client *client;
+  int count;
 public:
-  explicit C_C_UnplugHandleCaps(Client *c) : client(c) {}
+  explicit C_C_UnplugHandleCaps(Client *c, int n) : client(c), count(n) {}
   void finish(int r) {
     assert(client->client_lock.is_locked_by_me());
     while (!client->delayed_handle_caps.empty()) {
+      if (count != -1 && count <= 0) break;
       auto m = client->delayed_handle_caps.front();
       client->delayed_handle_caps.pop_front();
       client->handle_caps(m);
+      count--;
     }
     client->plug_handle_cap = false;
   }
@@ -2416,6 +2420,16 @@ void Client::set_cap_handle_delay(double delay)
   lseek_spins = 0;
   plug_handle_cap = false;
 }
+
+void Client::set_cap_handle_count(double count)
+{
+  Mutex::Locker l(client_lock);
+  cap_handle_count = count;
+  lseek_spins = 0;
+  plug_handle_cap = false;
+}
+
+
 
 bool Client::ms_dispatch(Message *m)
 {
@@ -7806,6 +7820,7 @@ int Client::close(int fd)
 
   // hack: shut it all down
   cap_handle_delay = 0.0;
+  cap_handle_count = -1;
   lseek_spins = 0;
   plug_handle_cap = false;
   while (!delayed_handle_caps.empty()) {
@@ -7851,6 +7866,7 @@ loff_t Client::_lseek(Fh *f, loff_t offset, int whence)
   Inode *in = f->inode.get();
   int r;
 
+  int cap_handle_count = 200000;
   if (cap_handle_delay > 0.0) {
     // if we don't have the cap, then drain anything pending, and let
     // everything new through the door.
@@ -7865,9 +7881,9 @@ loff_t Client::_lseek(Fh *f, loff_t offset, int whence)
       lseek_spins = 0;
     } else {
       lseek_spins++;
-      if (lseek_spins == 10) {
+      if (lseek_spins == 3) {
         plug_handle_cap = true;
-        auto e = new C_C_UnplugHandleCaps(this);
+        auto e = new C_C_UnplugHandleCaps(this, cap_handle_count);
         timer.add_event_after(cap_handle_delay, e);
       }
     }

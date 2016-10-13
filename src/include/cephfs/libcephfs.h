@@ -245,6 +245,7 @@ int ceph_unmount(struct ceph_mount_info *cmount);
 int ceph_release(struct ceph_mount_info *cmount);
 
 void ceph_set_cap_handle_delay(struct ceph_mount_info *cmount, double delay);
+void ceph_set_cap_handle_count(struct ceph_mount_info *cmount, double delay);
 int ceph_set_lseek_target(struct ceph_mount_info *cmount, int fd);
 
 /**
