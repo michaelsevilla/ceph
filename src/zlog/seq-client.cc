@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <boost/program_options.hpp>
@@ -206,6 +207,7 @@ int main(int argc, char **argv)
   std::string filename;
   bool idle;
   double capdelay;
+  int instances;
 
   po::options_description desc("Allowed options");
   desc.add_options()
@@ -215,11 +217,36 @@ int main(int argc, char **argv)
     ("filename", po::value<std::string>(&filename)->default_value("seq"), "Filename")
     ("idle", po::value<bool>(&idle)->default_value(false), "Idle")
     ("capdelay", po::value<double>(&capdelay)->default_value(0.0), "cap delay")
+    ("instances", po::value<int>(&instances)->default_value(1), "instances")
     ;
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
+
+  assert(instances > 0);
+  pid_t pids[instances];
+
+  if (instances > 1) {
+    for (int i = 1; i < instances; i++) {
+      pid_t pid = fork();
+      if (pid > 0) {
+        pids[i-1] = pid;
+        continue;
+      } else if (pid == 0) {
+        break;
+      } else if (pid == -1) {
+        perror("fork");
+        exit(1);
+      } else
+        assert(0);
+    }
+    if (perf_file.size()) {
+      std::stringstream ss;
+      ss << perf_file << "." << getpid();
+      perf_file = ss.str();
+    }
+  }
 
   /*
    * Connect to CephFS
@@ -271,6 +298,12 @@ int main(int argc, char **argv)
    */
   ceph_unmount(cmount);
   ceph_release(cmount);
+
+  if (instances > 1) {
+    for (int i = 0; i < instances; i++) {
+      waitpid(pids[i], NULL, 0);
+    }
+  }
 
   return 0;
 }
