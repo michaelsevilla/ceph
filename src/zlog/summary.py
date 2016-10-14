@@ -14,12 +14,18 @@ def get_experiments():
 
 def summarize_experiment(instances):
     total_ops = 0.0
+    total_lat = 0.0
+    num_instances = len(instances)
     for pid, filename in instances:
         f = open(filename)
         avg_ops = float(f.readline().strip())
+        avg_lat = float(f.readline().strip())
         total_ops += avg_ops
+        total_lat += avg_lat
         print "pid", pid, "average ops", avg_ops
-    print "total ops", total_ops
+    print "total ops", total_ops, \
+          "average lat", total_lat/num_instances, \
+          "average client ops", total_ops/num_instances
 
 def print_summary(instance, results, prefix=""):
     title = "%sexperiment: tag=%s time=%s" % \
