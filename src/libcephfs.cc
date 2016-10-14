@@ -834,6 +834,11 @@ extern "C" void ceph_set_cap_handle_delay(struct ceph_mount_info *cmount, double
   cmount->get_client()->set_cap_handle_delay(delay);
 }
 
+extern "C" void ceph_set_cap_handle_quota(struct ceph_mount_info *cmount, int quota)
+{
+  cmount->get_client()->set_cap_handle_quota(quota);
+}
+
 extern "C" int ceph_set_lseek_target(struct ceph_mount_info *cmount, int fd)
 {
   if (!cmount->is_mounted())

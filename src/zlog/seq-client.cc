@@ -224,6 +224,7 @@ int main(int argc, char **argv)
   bool idle;
   double capdelay;
   int instances;
+  int quota;
 
   po::options_description desc("Allowed options");
   desc.add_options()
@@ -234,6 +235,7 @@ int main(int argc, char **argv)
     ("idle", po::value<bool>(&idle)->default_value(false), "Idle")
     ("capdelay", po::value<double>(&capdelay)->default_value(0.0), "cap delay")
     ("instances", po::value<int>(&instances)->default_value(1), "instances")
+    ("quota", po::value<int>(&quota)->default_value(0), "quota")
     ;
 
   po::variables_map vm;
@@ -296,6 +298,8 @@ int main(int argc, char **argv)
 
   if (capdelay > 0.0)
     ceph_set_cap_handle_delay(cmount, capdelay);
+  if (quota > 0)
+    ceph_set_cap_handle_quota(cmount, quota);
 
   /*
    * Start workload

@@ -263,6 +263,8 @@ Client::Client(Messenger *m, MonClient *mc)
   num_flushing_caps = 0;
 
   cap_handle_delay = 0.0;
+  cap_handle_quota = 0;
+  cap_handle_count = 0;
   plug_handle_cap = false;
 
   _dir_vxattrs_name_size = _vxattrs_calcu_name_size(_dir_vxattrs);
@@ -2449,6 +2451,13 @@ int Client::set_lseek_target(int fd)
   return 0;
 }
 
+void Client::set_cap_handle_quota(int quota)
+{
+  Mutex::Locker l(client_lock);
+  cap_handle_quota = quota;
+  plug_handle_cap = false;
+}
+
 void Client::set_cap_handle_delay(double delay)
 {
   Mutex::Locker l(client_lock);
@@ -2502,7 +2511,8 @@ bool Client::ms_dispatch(Message *m)
       inodeno_t target = lseek_target;
       bool is_target = (mm->get_ino() == target) && (mm->get_caps() == 2133);
 
-      if (target > 0 && plug_handle_cap && is_target && cap_handle_delay > 0.0) {
+      if (target > 0 && plug_handle_cap && is_target &&
+          (cap_handle_delay > 0.0 || cap_handle_quota > 0)) {
         delayed_handle_caps.push_back(mm);
       } else {
         handle_caps(static_cast<MClientCaps*>(m));
@@ -8141,6 +8151,7 @@ int Client::close(int fd)
   Inode *in = fh->inode.get();
   if (lseek_target > 0 && in->ino == lseek_target) { // is this the seq inode ?
     cap_handle_delay = 0.0;
+    cap_handle_quota = 0;
     plug_handle_cap = false;
     while (!delayed_handle_caps.empty()) {
       auto m = delayed_handle_caps.front();
@@ -8197,7 +8208,7 @@ loff_t Client::_lseek(Fh *f, loff_t offset, int whence)
    * we did not have the cap and we block until we receive the cap. That point
    * is here, as we must block until we have the stat size cap.
    */
-  if (cap_handle_delay > 0.0) { // are we even trying to introduce delay ?
+  if (cap_handle_delay > 0.0 || cap_handle_quota > 0) { // are we even trying ?
     if (lseek_target > 0 && in->ino == lseek_target) { // is this the seq inode ?
       bool has_cap = in->caps_issued_mask(CEPH_STAT_CAP_SIZE);
       if (!has_cap) { // we need to get the cap and then start time slice
@@ -8227,8 +8238,25 @@ loff_t Client::_lseek(Fh *f, loff_t offset, int whence)
 
         // block the caps for the specified delay
         plug_handle_cap = true;
-        auto e = new C_C_UnplugHandleCaps(this);
-        timer.add_event_after(cap_handle_delay, e);
+        cap_handle_count = 0;
+
+        timer.cancel_event(cap_handle_timer_event);
+        cap_handle_timer_event = new C_C_UnplugHandleCaps(this);
+        timer.add_event_after(cap_handle_delay, cap_handle_timer_event);
+      }
+
+      if (cap_handle_quota > 0) {
+        if (cap_handle_count > cap_handle_quota) {
+          timer.cancel_event(cap_handle_timer_event);
+          while (!delayed_handle_caps.empty()) {
+            auto m = delayed_handle_caps.front();
+            delayed_handle_caps.pop_front();
+            handle_caps(m);
+          }
+          plug_handle_cap = false;
+        }
+
+        cap_handle_count++;
       }
     }
   }

@@ -405,6 +405,7 @@ public:
   void sync_write_commit(InodeRef& in);
 
   void set_cap_handle_delay(double delay);
+  void set_cap_handle_quota(int quota);
   int set_lseek_target(int fd);
 
 protected:
@@ -723,7 +724,10 @@ private:
 
   bool plug_handle_cap;
   double cap_handle_delay;
+  int cap_handle_quota;
+  int cap_handle_count;
   std::list<MClientCaps*> delayed_handle_caps;
+  Context *cap_handle_timer_event;
 
   /*
    * this is the inode for the file representing the sequencer. ideally we
