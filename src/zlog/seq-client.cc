@@ -227,6 +227,14 @@ int main(int argc, char **argv)
   assert(instances > 0);
   pid_t pids[instances];
 
+  time_t ts = time(NULL);
+
+  if (perf_file.size()) {
+    std::stringstream ss;
+    ss << perf_file << "." << ts;
+    perf_file = ss.str();
+  }
+
   if (instances > 1) {
     for (int i = 1; i < instances; i++) {
       pid_t pid = fork();
@@ -240,11 +248,6 @@ int main(int argc, char **argv)
         exit(1);
       } else
         assert(0);
-    }
-    if (perf_file.size()) {
-      std::stringstream ss;
-      ss << perf_file << "." << getpid();
-      perf_file = ss.str();
     }
   }
 
@@ -262,8 +265,12 @@ int main(int argc, char **argv)
   ret = ceph_mount(cmount, "/");
   assert(ret == 0);
 
-  if (perf_file.size())
+  if (perf_file.size()) {
+    std::stringstream ss;
+    ss << perf_file << "." << getpid();
+    perf_file = ss.str();
     latencies.reserve(20000000);
+  }
 
   std::cout << "Running for " << runtime_sec << " seconds" << std::endl;
 
