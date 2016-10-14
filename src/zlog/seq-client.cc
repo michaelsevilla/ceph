@@ -34,6 +34,8 @@ static std::atomic_ullong ios;
 
 static uint64_t run_start_ns;
 static uint64_t run_end_ns;
+static uint64_t total_latency;
+static uint64_t total_ops;
 
 static void sigint_handler(int sig)
 {
@@ -82,10 +84,15 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
 
   run_start_ns = 0;
 
+  total_latency = 0;
+  total_ops = 0;
+
   for (;;) {
     uint64_t start = getns();
     int64_t ret = ceph_lseek(cmount, fd, 0, SEEK_END);
     uint64_t latency = getns() - start;
+    total_latency += latency;
+    total_ops++;
     assert(ret == 0);
 
     ios++;
@@ -161,6 +168,11 @@ static void dump_latency(std::string file)
   // average throughput
   dprintf(fd, "%f\n", iops);
 
+  // average latency
+  double d_total_latency = (double)total_latency;
+  double d_total_ops = (double)total_ops;
+  dprintf(fd, "%f\n", (d_total_latency/d_total_ops));
+
   // latency cdf
   for (auto it = samples.begin(); it != samples.end(); it++) {
     size_t pos = *it;
@@ -191,8 +203,12 @@ static void report(int period)
     // completed ios in prev period
     double iops = (double)(period_ios * 1000000000ULL) / (double)dur_ns;
 
+    double d_total_latency = (double)total_latency;
+    double d_total_ops = (double)total_ops;
+
     uint64_t elapsed_sec = (end_ns - expr_start_ns) / 1000000000ULL;
-    std::cout << elapsed_sec << "s: " << "rate=" << (int)iops << " reqs" << std::endl;
+    std::cout << elapsed_sec << "s: " << "rate=" << (int)iops << " reqs"
+      << " avg latency " << (d_total_latency/d_total_ops) << std::endl;
 
     if (stop)
       break;
