@@ -45,22 +45,10 @@ static void sigint_handler(int sig)
 // <start, latency>
 static std::vector<std::pair<uint64_t, uint64_t>> latencies;
 
-static void run(struct ceph_mount_info *cmount, std::string filename, bool idle, bool record_latency)
+static void run(struct ceph_mount_info *cmount, std::string filename, bool idle, bool record_latency, std::string op)
 {
-  int ret = ceph_mkdir(cmount, "/seqdir", 0755);
-  if (ret && ret != -EEXIST) {
-    std::cerr << "mkdir: " << strerror(-ret) << std::endl;
-    assert(0);
-  }
-
-  ret = ceph_mkdir(cmount, "/seqdir/seqdir", 0755);
-  if (ret && ret != -EEXIST) {
-    std::cerr << "mkdir: " << strerror(-ret) << std::endl;
-    assert(0);
-  }
-
   std::stringstream ss;
-  ss << "/seqdir/seqdir/" << filename;
+  ss << filename;
   std::string path = ss.str();
 
   std::cout << "path " << path << std::endl;
@@ -89,7 +77,17 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
 
   for (;;) {
     uint64_t start = getns();
-    int64_t ret = ceph_lseek(cmount, fd, 0, SEEK_END);
+    int ret = 0;
+    if (op == "stat") {
+      struct stat st;
+      ret = ceph_stat(cmount, path.c_str(), &st);
+    }
+    else if (op == "fstat") {
+      struct stat st;
+      ret = ceph_fstat(cmount, fd, &st);
+    }
+    else
+      ret = ceph_lseek(cmount, fd, 0, SEEK_END);
     uint64_t latency = getns() - start;
     total_latency += latency;
     total_ops++;
@@ -225,12 +223,14 @@ int main(int argc, char **argv)
   double capdelay;
   int instances;
   int quota;
+  std::string op;
 
   po::options_description desc("Allowed options");
   desc.add_options()
     ("report-sec", po::value<int>(&report_period)->default_value(5), "Report sec")
     ("runtime", po::value<int>(&runtime_sec)->default_value(30), "Runtime sec")
     ("perf_file", po::value<std::string>(&perf_file)->default_value(""), "Perf file")
+    ("op", po::value<std::string>(&op)->default_value(""), "Operation")
     ("filename", po::value<std::string>(&filename)->default_value("seq"), "Filename")
     ("idle", po::value<bool>(&idle)->default_value(false), "Idle")
     ("capdelay", po::value<double>(&capdelay)->default_value(0.0), "cap delay")
@@ -291,6 +291,7 @@ int main(int argc, char **argv)
   }
 
   std::cout << "Running for " << runtime_sec << " seconds" << std::endl;
+  std::cout << "\t op=" << op << " capdelay=" << capdelay << " quota=" << quota << std::endl;
 
   assert(signal(SIGINT, sigint_handler) != SIG_ERR);
 
@@ -305,7 +306,7 @@ int main(int argc, char **argv)
    * Start workload
    */
   std::thread runner{[&] {
-    run(cmount, filename, idle, perf_file.size() > 0);
+    run(cmount, filename, idle, perf_file.size() > 0, op);
   }};
 
   std::thread reporter{[&] {
