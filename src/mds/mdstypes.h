@@ -1174,6 +1174,7 @@ struct mds_load_t {
   double queue_len;
 
   double cpu_load_avg;
+  double cpu_load_inst;
 
   explicit mds_load_t(const utime_t &t) : 
     auth(t), all(t), req_rate(0), cache_hit_rate(0),

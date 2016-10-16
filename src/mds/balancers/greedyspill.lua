@@ -1,4 +1,4 @@
-metrics = {"auth.meta_load", "all.meta_load", "req_rate", "queue_len", "cpu_load_avg"}
+metrics = {"auth.meta_load", "all.meta_load", "req_rate", "queue_len", "cpu_load_avg", "cpu_load_inst"}
 
 -- Metric for balancing is the workload; also dumps metrics
 function mds_load()

@@ -52,6 +52,9 @@ class MDBalancer {
   utime_t last_fragment;
   utime_t last_sample;    
   utime_t rebalance_time; //ensure a consistent view of load for rebalance
+  double prev_cpu_inst;   //instantaneous cpu utilization (previous measurements)
+  double prev_cpu_work;   //cpu time spent doing work: usr + sys + nice
+  double prev_cpu_sums;   //cpu time spent doing anything
 
   // todo
   set<dirfrag_t>   split_queue, merge_queue;

@@ -167,6 +167,46 @@ mds_load_t MDBalancer::get_load(utime_t now)
   else
     derr << "input file '/proc/loadavg' not found" << dendl;
   
+  // instantaneous CPU utilization
+  ifstream cpu_inst("/proc/stat");
+  if (!cpu_inst.is_open())
+    derr << "input file '/proc/stat' not found" << dendl;
+  else {
+    map<string, double> procstat;
+    string temp;
+    static const char* c[9] = {"cpu", "usr", "nice",
+                               "sys", "idle", "iowait",
+                               "irq", "softirq", "steal"};
+    for (int i = 0; i < 9; i++) {
+      cpu_inst >> temp;
+      procstat.insert(pair<string,double>(c[i], atof(temp.c_str())));
+    }
+    cpu_inst.close();
+
+    double cpu_sums = 0;
+    double cpu_work = 0;
+    for (map<string, double>:: iterator it = procstat.begin();
+         it != procstat.end();
+         it++) {
+      cpu_sums += it->second;
+      if (!it->first.compare("usr") ||
+          !it->first.compare("sys") ||
+          !it->first.compare("nice"))
+        cpu_work += it->second;
+    }
+
+    // save it if it is a legit sample.
+    double cpu_work_period = cpu_work - prev_cpu_work;
+    double cpu_sums_period = cpu_sums - prev_cpu_sums;
+    if (cpu_sums_period > 100 && cpu_work_period > 100) {
+      prev_cpu_inst = 100*cpu_work_period/cpu_sums_period;
+      prev_cpu_work = cpu_work;
+      prev_cpu_sums = cpu_sums;
+      dout(15) << "get_load cpu=" << cpu_work_period << "/" << cpu_sums_period << "=" << load.cpu_load_inst << dendl;
+    }
+    load.cpu_load_inst = prev_cpu_inst;
+  }
+
   dout(15) << "get_load " << load << dendl;
   return load;
 }
@@ -680,7 +720,8 @@ int MDBalancer::mantle_prep_rebalance()
                   {"all.meta_load", load.all.meta_load()},
                   {"req_rate", load.req_rate},
                   {"queue_len", load.queue_len},
-                  {"cpu_load_avg", load.cpu_load_avg}};
+                  {"cpu_load_avg", load.cpu_load_avg},
+                  {"cpu_load_inst", load.cpu_load_inst}};
   }
 
   /* execute the balancer */
