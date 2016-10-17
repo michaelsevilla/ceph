@@ -977,6 +977,7 @@ void mds_load_t::encode(bufferlist &bl) const {
   ::encode(cache_hit_rate, bl);
   ::encode(queue_len, bl);
   ::encode(cpu_load_avg, bl);
+  ::encode(cpu_load_inst, bl);
   ENCODE_FINISH(bl);
 }
 
@@ -988,6 +989,7 @@ void mds_load_t::decode(const utime_t &t, bufferlist::iterator &bl) {
   ::decode(cache_hit_rate, bl);
   ::decode(queue_len, bl);
   ::decode(cpu_load_avg, bl);
+  ::decode(cpu_load_inst, bl);
   DECODE_FINISH(bl);
 }
 
@@ -997,6 +999,7 @@ void mds_load_t::dump(Formatter *f) const
   f->dump_float("cache hit rate", cache_hit_rate);
   f->dump_float("queue length", queue_len);
   f->dump_float("cpu load", cpu_load_avg);
+  f->dump_float("cpu load", cpu_load_inst);
   f->open_object_section("auth dirfrag");
   auth.dump(f);
   f->close_section();
