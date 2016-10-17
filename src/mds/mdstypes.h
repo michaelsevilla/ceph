@@ -1175,15 +1175,17 @@ struct mds_load_t {
 
   double cpu_load_avg;
   double cpu_load_inst;
+  double programmable;
 
   explicit mds_load_t(const utime_t &t) : 
     auth(t), all(t), req_rate(0), cache_hit_rate(0),
-    queue_len(0), cpu_load_avg(0), cpu_load_inst(0)
+    queue_len(0), cpu_load_avg(0), cpu_load_inst(0),
+    programmable(0)
   {}
   // mostly for the dencoder infrastructure
   mds_load_t() :
     auth(), all(),
-    req_rate(0), cache_hit_rate(0), queue_len(0), cpu_load_avg(0), cpu_load_inst(0)
+    req_rate(0), cache_hit_rate(0), queue_len(0), cpu_load_avg(0), cpu_load_inst(0), programmable(0)
   {}
   
   double mds_load();  // defiend in MDBalancer.cc
@@ -1207,6 +1209,7 @@ inline std::ostream& operator<<( std::ostream& out, mds_load_t& load )
              << ", qlen " << load.queue_len
 	     << ", cpu " << load.cpu_load_avg
 	     << ", cpu inst" << load.cpu_load_inst
+             << ", programmable" << load.programmable
              << ">";
 }
 

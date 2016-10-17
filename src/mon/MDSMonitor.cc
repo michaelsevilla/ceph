@@ -1919,6 +1919,15 @@ public:
           fs->mds_map.set_balancer(val);
         });
       return true;
+    } else if (var == "balancer_metric") {
+      ss << "setting the metadata load balancer metric to " << val;
+        fsmap.modify_filesystem(
+            fs->fscid,
+            [val](std::shared_ptr<Filesystem> fs)
+        {
+          fs->mds_map.set_balancer_metric(val);
+        });
+      return true;
     } else if (var == "max_file_size") {
       if (interr.length()) {
 	ss << var << " requires an integer value";

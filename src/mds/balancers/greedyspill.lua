@@ -1,11 +1,16 @@
-metrics = {"auth.meta_load", "all.meta_load", "req_rate", "queue_len", "cpu_load_avg", "cpu_load_inst"}
+metrics = {"auth.meta_load", "all.meta_load", "req_rate", "queue_len", "cpu_load_avg", "cpu_load_inst", "programmable"}
 
 -- Metric for balancing is the workload; also dumps metrics
 function mds_load()
+  m = "METRICS: < "
+  for i=1, #metrics do
+    m = m..metrics[i].." "
+  end
+  BAL_LOG(0, m..">")
   for i=0, #mds do
     s = "MDS"..i..": < "
     for j=1, #metrics do
-      s = s..metrics[j].."="..mds[i][metrics[j]].." "
+      s = s..mds[i][metrics[j]].." "
     end
     mds[i]["load"] = mds[i]["all.meta_load"]
     BAL_LOG(0, s.."> load="..mds[i]["load"])

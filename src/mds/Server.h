@@ -77,6 +77,21 @@ public:
 
   void handle_osd_map();
 
+  // gimme some metrics
+  int get_metric(string metric) { 
+    if (!metric.compare("handle_client_request"))
+      return logger->get(l_mdss_handle_client_request);
+    if (!metric.compare("handle_slave_request"))
+      return logger->get(l_mdss_handle_slave_request);
+    if (!metric.compare("handle_client_session"))
+      return logger->get(l_mdss_handle_client_session);
+    if (!metric.compare("dispatch_client_request"))
+      return logger->get(l_mdss_dispatch_client_request);
+    if (!metric.compare("dispatch_slave_request"))
+      return logger->get(l_mdss_dispatch_slave_request);
+    return -1;
+  }
+
   // -- sessions and recovery --
   utime_t  reconnect_start;
   set<client_t> client_reconnect_gather;  // clients i need a reconnect msg from.

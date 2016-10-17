@@ -16,6 +16,7 @@
 
 #include "MDBalancer.h"
 #include "MDSRank.h"
+#include "Server.h"
 #include "mon/MonClient.h"
 #include "MDSMap.h"
 #include "CInode.h"
@@ -28,6 +29,7 @@
 #include "msg/Messenger.h"
 #include "messages/MHeartbeat.h"
 #include "messages/MMDSLoadTargets.h"
+#include "common/perf_counters.h"
 
 #include <fstream>
 #include <iostream>
@@ -77,12 +79,6 @@ void MDBalancer::tick()
   utime_t now = ceph_clock_now(g_ceph_context);
   utime_t elapsed = now;
   elapsed -= first;
-
-  // sample?
-  if ((double)now - (double)last_sample > g_conf->mds_bal_sample_interval) {
-    dout(15) << "tick last_sample now " << now << dendl;
-    last_sample = now;
-  }
 
   // balance?
   if (last_heartbeat == utime_t())
@@ -275,6 +271,13 @@ void MDBalancer::send_heartbeat()
 
   // my load
   mds_load_t load = get_load(now);
+
+  // programmable metric (put it here because get_load get's called mutliple times)
+  int v = mds->server->get_metric(mds->mdsmap->get_balancer_metric());
+  load.programmable = v - prev_programmable;
+  dout(0) << "MSEVILLA: v=" << v << " prev_prog=" << prev_programmable << " load.programamble=" << load.programmable << dendl;
+  prev_programmable = v;
+
   map<mds_rank_t, mds_load_t>::value_type val(mds->get_nodeid(), load);
   mds_load.insert(val);
 
@@ -321,6 +324,7 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
 
   mds_rank_t who = mds_rank_t(m->get_source().num());
   dout(25) << "=== got heartbeat " << m->get_beat() << " from " << m->get_source().num() << " " << m->get_load() << dendl;
+
 
   if (!mds->is_active())
     goto out;
@@ -721,7 +725,8 @@ int MDBalancer::mantle_prep_rebalance()
                   {"req_rate", load.req_rate},
                   {"queue_len", load.queue_len},
                   {"cpu_load_avg", load.cpu_load_avg},
-                  {"cpu_load_inst", load.cpu_load_inst}};
+                  {"cpu_load_inst", load.cpu_load_inst},
+                  {"programmable", load.programmable}};
   }
 
   /* execute the balancer */

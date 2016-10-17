@@ -44,6 +44,7 @@ static void sigint_handler(int sig)
 
 // <start, latency>
 static std::vector<std::pair<uint64_t, uint64_t>> latencies;
+static std::vector<uint64_t> requests;
 
 static void run(struct ceph_mount_info *cmount, std::string filename, bool idle, bool record_latency, std::string op)
 {
@@ -77,6 +78,7 @@ static void run(struct ceph_mount_info *cmount, std::string filename, bool idle,
 
   for (;;) {
     uint64_t start = getns();
+    requests.push_back(start);
     int ret = 0;
     if (op == "stat") {
       struct stat st;
@@ -183,6 +185,24 @@ static void dump_latency(std::string file)
   close(fd);
 }
 
+static void dump_request(std::string file)
+{
+  if (file.size() == 0)
+    return;
+
+  /*
+   * output
+   */
+  int fd = 0;
+  fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0644);
+  assert(fd > 0);
+  for (auto it = requests.begin(); it != requests.end(); it++) {
+    dprintf(fd, "%llu\n", (unsigned long long)(*it));
+  }
+  fsync(fd);
+  close(fd);
+}
+
 static void report(int period)
 {
   ios = 0;
@@ -218,6 +238,7 @@ int main(int argc, char **argv)
   int report_period;
   int runtime_sec;
   std::string perf_file;
+  std::string reqs_file;
   std::string filename;
   bool idle;
   double capdelay;
@@ -230,6 +251,7 @@ int main(int argc, char **argv)
     ("report-sec", po::value<int>(&report_period)->default_value(5), "Report sec")
     ("runtime", po::value<int>(&runtime_sec)->default_value(30), "Runtime sec")
     ("perf_file", po::value<std::string>(&perf_file)->default_value(""), "Perf file")
+    ("reqs_file", po::value<std::string>(&reqs_file)->default_value(""), "Reqs file")
     ("op", po::value<std::string>(&op)->default_value(""), "Operation")
     ("filename", po::value<std::string>(&filename)->default_value("seq"), "Filename")
     ("idle", po::value<bool>(&idle)->default_value(false), "Idle")
@@ -251,6 +273,12 @@ int main(int argc, char **argv)
     std::stringstream ss;
     ss << perf_file << "." << ts;
     perf_file = ss.str();
+  }
+
+  if (reqs_file.size()) {
+    std::stringstream ss;
+    ss << reqs_file << "." << ts;
+    reqs_file = ss.str();
   }
 
   if (instances > 1) {
@@ -290,6 +318,13 @@ int main(int argc, char **argv)
     latencies.reserve(20000000);
   }
 
+  if (reqs_file.size()) {
+    std::stringstream ss;
+    ss << reqs_file << "." << getpid();
+    reqs_file = ss.str();
+    latencies.reserve(20000000);
+  }
+
   std::cout << "Running for " << runtime_sec << " seconds" << std::endl;
   std::cout << "\t op=" << op << " capdelay=" << capdelay << " quota=" << quota << std::endl;
 
@@ -320,6 +355,7 @@ int main(int argc, char **argv)
   reporter.join();
 
   dump_latency(perf_file);
+  dump_request(reqs_file);
 
   /*
    * Clean-up connections...

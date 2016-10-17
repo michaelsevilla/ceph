@@ -185,6 +185,7 @@ void MDSMap::dump(Formatter *f) const
   f->dump_bool("enabled", enabled);
   f->dump_string("fs_name", fs_name);
   f->dump_string("balancer", balancer);
+  f->dump_string("balancer_metric", balancer_metric);
 }
 
 void MDSMap::generate_test_instances(list<MDSMap*>& ls)
@@ -228,6 +229,7 @@ void MDSMap::print(ostream& out) const
   out << "metadata_pool\t" << metadata_pool << "\n";
   out << "inline_data\t" << (inline_data_enabled ? "enabled" : "disabled") << "\n";
   out << "balancer\t" << balancer << "\n";
+  out << "balancer_metric\t" << balancer_metric << "\n";
 
   multimap< pair<mds_rank_t, unsigned>, mds_gid_t > foo;
   for (const auto &p : mds_info) {
@@ -578,6 +580,7 @@ void MDSMap::encode(bufferlist& bl, uint64_t features) const
   ::encode(fs_name, bl);
   ::encode(damaged, bl);
   ::encode(balancer, bl);
+  ::encode(balancer_metric, bl);
   ENCODE_FINISH(bl);
 }
 
@@ -685,6 +688,7 @@ void MDSMap::decode(bufferlist::iterator& p)
 
   if (ev >= 11) {
   ::decode(balancer, p);
+  ::decode(balancer_metric, p);
   }
   DECODE_FINISH(p);
 }

@@ -194,6 +194,7 @@ protected:
 
   mds_rank_t max_mds; /* The maximum number of active MDSes. Also, the maximum rank. */
   string balancer;    /* The name/version of the mantle balancer (i.e. the rados obj name) */
+  string balancer_metric; /* The name/version of the programmable mantle balancer metric */
 
   std::set<mds_rank_t> in;              // currently defined cluster
 
@@ -291,7 +292,9 @@ public:
   void set_max_mds(mds_rank_t m) { max_mds = m; }
 
   const std::string get_balancer() const { return balancer; }
+  const std::string get_balancer_metric() const { return balancer_metric; }
   void set_balancer(std::string val) { balancer.assign(val); }
+  void set_balancer_metric(std::string val) { balancer_metric.assign(val); }
 
   mds_rank_t get_tableserver() const { return tableserver; }
   mds_rank_t get_root() const { return root; }
