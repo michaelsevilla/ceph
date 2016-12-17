@@ -118,6 +118,33 @@ void Server::create_logger()
       "Client session messages", "hcs");
   plb.add_u64_counter(l_mdss_dispatch_client_request, "dispatch_client_request", "Client requests dispatched");
   plb.add_u64_counter(l_mdss_dispatch_slave_request, "dispatch_server_request", "Server requests dispatched");
+  plb.add_u64_counter(l_mdss_req_lookupino, "req_lookupino", "Request type lookup inode");
+  plb.add_u64_counter(l_mdss_req_lookupparent, "req_lookupparent", "Request type lookup parent");
+  plb.add_u64_counter(l_mdss_req_lookupname, "req_lookupname", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_lookup, "req_lookup", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_lookupsnap, "req_lookupsnap", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_getattr, "req_getattr", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_setattr, "req_setattr", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_setlayout, "req_setlayout", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_setdirlayout, "req_setdirlayout", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_setxattr, "req_setxattr", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_rmxattr, "req_rmxattr", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_readdir, "req_readdir", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_setfilelock, "req_setfilelock", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_getfilelock, "req_getfilelock", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_create, "req_create", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_open, "req_open", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_mknod, "req_mknod", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_link, "req_link", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_unlink, "req_unlink", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_rmdir, "req_rmdir", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_rename, "req_rename", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_mkdir, "req_mkdir", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_symlink, "req_symlink", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_lssnap, "req_lssnap", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_mksnap, "req_mksnap", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_rmsnap, "req_rmsnap", "Requests dispatched");
+  plb.add_u64_counter(l_mdss_req_renamesnap, "req_renamesnap", "Requests dispatched");
   logger = plb.create_perf_counters();
   g_ceph_context->get_perfcounters_collection()->add(logger);
 }
@@ -1515,56 +1542,71 @@ void Server::dispatch_client_request(MDRequestRef& mdr)
   switch (req->get_op()) {
   case CEPH_MDS_OP_LOOKUPHASH:
   case CEPH_MDS_OP_LOOKUPINO:
+    logger->inc(l_mdss_req_lookupino);
     handle_client_lookup_ino(mdr, false, false);
     break;
   case CEPH_MDS_OP_LOOKUPPARENT:
+    logger->inc(l_mdss_req_lookupparent);
     handle_client_lookup_ino(mdr, true, false);
     break;
   case CEPH_MDS_OP_LOOKUPNAME:
+    logger->inc(l_mdss_req_lookupname);
     handle_client_lookup_ino(mdr, false, true);
     break;
 
     // inodes ops.
   case CEPH_MDS_OP_LOOKUP:
+    logger->inc(l_mdss_req_lookup);
     handle_client_getattr(mdr, true);
     break;
 
   case CEPH_MDS_OP_LOOKUPSNAP:
+    logger->inc(l_mdss_req_lookupsnap);
     // lookupsnap does not reference a CDentry; treat it as a getattr
   case CEPH_MDS_OP_GETATTR:
+    logger->inc(l_mdss_req_getattr);
     handle_client_getattr(mdr, false);
     break;
 
   case CEPH_MDS_OP_SETATTR:
+    logger->inc(l_mdss_req_setattr);
     handle_client_setattr(mdr);
     break;
   case CEPH_MDS_OP_SETLAYOUT:
+    logger->inc(l_mdss_req_setlayout);
     handle_client_setlayout(mdr);
     break;
   case CEPH_MDS_OP_SETDIRLAYOUT:
+    logger->inc(l_mdss_req_setdirlayout);
     handle_client_setdirlayout(mdr);
     break;
   case CEPH_MDS_OP_SETXATTR:
+    logger->inc(l_mdss_req_setxattr);
     handle_client_setxattr(mdr);
     break;
   case CEPH_MDS_OP_RMXATTR:
+    logger->inc(l_mdss_req_rmxattr);
     handle_client_removexattr(mdr);
     break;
 
   case CEPH_MDS_OP_READDIR:
+    logger->inc(l_mdss_req_readdir);
     handle_client_readdir(mdr);
     break;
 
   case CEPH_MDS_OP_SETFILELOCK:
+    logger->inc(l_mdss_req_setfilelock);
     handle_client_file_setlock(mdr);
     break;
 
   case CEPH_MDS_OP_GETFILELOCK:
+    logger->inc(l_mdss_req_getfilelock);
     handle_client_file_readlock(mdr);
     break;
 
     // funky.
   case CEPH_MDS_OP_CREATE:
+    logger->inc(l_mdss_req_create);
     if (mdr->has_completed)
       handle_client_open(mdr);  // already created.. just open
     else
@@ -1572,43 +1614,55 @@ void Server::dispatch_client_request(MDRequestRef& mdr)
     break;
 
   case CEPH_MDS_OP_OPEN:
+    logger->inc(l_mdss_req_open);
     handle_client_open(mdr);
     break;
 
     // namespace.
     // no prior locks.
   case CEPH_MDS_OP_MKNOD:
+    logger->inc(l_mdss_req_mknod);
     handle_client_mknod(mdr);
     break;
   case CEPH_MDS_OP_LINK:
+    logger->inc(l_mdss_req_link);
     handle_client_link(mdr);
     break;
   case CEPH_MDS_OP_UNLINK:
+    logger->inc(l_mdss_req_unlink);
   case CEPH_MDS_OP_RMDIR:
+    logger->inc(l_mdss_req_rmdir);
     handle_client_unlink(mdr);
     break;
   case CEPH_MDS_OP_RENAME:
+    logger->inc(l_mdss_req_rename);
     handle_client_rename(mdr);
     break;
   case CEPH_MDS_OP_MKDIR:
+    logger->inc(l_mdss_req_mkdir);
     handle_client_mkdir(mdr);
     break;
   case CEPH_MDS_OP_SYMLINK:
+    logger->inc(l_mdss_req_symlink);
     handle_client_symlink(mdr);
     break;
 
 
     // snaps
   case CEPH_MDS_OP_LSSNAP:
+    logger->inc(l_mdss_req_lssnap);
     handle_client_lssnap(mdr);
     break;
   case CEPH_MDS_OP_MKSNAP:
+    logger->inc(l_mdss_req_mksnap);
     handle_client_mksnap(mdr);
     break;
   case CEPH_MDS_OP_RMSNAP:
+    logger->inc(l_mdss_req_rmsnap);
     handle_client_rmsnap(mdr);
     break;
   case CEPH_MDS_OP_RENAMESNAP:
+    logger->inc(l_mdss_req_renamesnap);
     handle_client_renamesnap(mdr);
     break;
 
