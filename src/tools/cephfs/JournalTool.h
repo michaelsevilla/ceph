@@ -76,9 +76,16 @@ class JournalTool : public MDSUtility
     int consume_inos(const std::set<inodeno_t> &inos);
 
   public:
+    int nfiles;
+    bool persist;
+    bool memapply;
+    string file;
+    uint64_t start_ino;
+    string decoupled_dir;
     void usage();
     JournalTool() :
-      rank(0) {}
+      rank(0), nfiles(100), persist(false), memapply(false),
+      file("/tmp/blah.bin"), start_ino(1099511627780), decoupled_dir("bogus") {}
     int main(std::vector<const char*> &argv);
 };
 

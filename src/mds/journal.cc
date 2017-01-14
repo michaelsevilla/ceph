@@ -904,6 +904,52 @@ void EMetaBlob::get_inodes(
   }
 }
 
+void EMetaBlob::append_open(string fname, inodeno_t newino, inodeno_t parentino, map<dirfrag_t, dirlump> lm)
+{
+  for(map<dirfrag_t, dirlump>::iterator i = lm.begin();
+      i != lm.end();
+      i++) {
+    if (parentino == i->first.ino) {
+
+      // copy dirfrag and dirlump from decoupled directory
+      // TODO: shouldn't have to copy lump values here
+      dirlump lump;
+      lump.fnode.version = 1;
+    
+      // add all information about the bogus file
+      used_preallocated_ino = newino;
+      fullbit *fb = new fullbit();
+      fb->dn = fname;
+      fb->inode.ino = newino;
+      fb->dnfirst = 2;
+      fb->dnlast = CEPH_NOSNAP;
+      fb->inode.mode = 33188;
+      fb->inode.dir_layout.dl_dir_hash = 0;
+      fb->dnv = 2;
+      fb->inode.version = 2;
+      fb->inode.file_data_version = 0;
+      fb->inode.xattr_version = 1;
+      fb->inode.backtrace_version = 2;
+      fb->inode.nlink= 1;
+      fb->inode.layout.stripe_unit = 4194304;
+      fb->inode.layout.stripe_count = 1;
+      fb->inode.layout.object_size = 4194304;
+      fb->inode.layout.pool_id = 1;
+      fb->state |= EMetaBlob::fullbit::STATE_DIRTY;
+      fb->state |= EMetaBlob::fullbit::STATE_DIRTYPARENT;
+      fb->state |= EMetaBlob::fullbit::STATE_DIRTYPOOL;
+
+      // add to the lump maps
+      lump.add_dfull(ceph::shared_ptr<fullbit>(fb));
+      lump_map.insert(std::pair<dirfrag_t, dirlump>(i->first, lump));
+      lump_order.push_back(i->first);
+    } else {
+      // add to the lump maps
+      lump_map.insert(std::pair<dirfrag_t, dirlump>(i->first, i->second));
+      lump_order.push_back(i->first);
+    }
+  }
+}
 
 /**
  * Get a map of dirfrag to set of dentries in that dirfrag which are

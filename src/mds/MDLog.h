@@ -322,6 +322,7 @@ public:
   void open(MDSInternalContextBase *onopen);      // append() or replay() to follow!
   void reopen(MDSInternalContextBase *onopen);
   void append();
+  int merge(string events);
   void replay(MDSInternalContextBase *onfinish);
 
   void standby_trim_segments();

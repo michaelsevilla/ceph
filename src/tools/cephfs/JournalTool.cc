@@ -23,6 +23,8 @@
 
 #include "mds/events/ENoOp.h"
 #include "mds/events/EUpdate.h"
+#include "mds/events/EOpen.h"
+#include "mds/events/EMetaBlob.h"
 
 #include "JournalScanner.h"
 #include "EventOutput.h"
@@ -56,7 +58,13 @@ void JournalTool::usage()
     << "      --type=<UPDATE|OPEN|SESSION...><\n"
     << "      --frag=<ino>.<frag> [--dname=<dentry string>]\n"
     << "      --client=<session id integer>\n"
-    << "    <effect>: [get|apply|recover_dentries|splice]\n"
+    << "      --nfiles=<number of files>\n"
+    << "      --persist=<true|false>\n"
+    << "      --memapply=<true|false>\n"
+    << "      --file=<serialized binary file>\n"
+    << "      --start_ino=<which inode to start counting from>\n"
+    << "      --decoupled_dir=<directory that was decoupled>\n"
+    << "    <effect>: [get|apply|recover_dentries|splice|create|load]\n"
     << "    <output>: [summary|list|binary|json] [--path <path>]\n"
     << "\n"
     << "Options:\n"
@@ -81,8 +89,10 @@ int JournalTool::main(std::vector<const char*> &argv)
     return -EINVAL;
   }
 
+  dout(10) << "JournalTool::main " << dendl;
   std::vector<const char*>::iterator arg = argv.begin();
 
+  dout(10) << "JournalTool::main " << dendl;
   std::string rank_str;
   if(!ceph_argparse_witharg(argv, arg, &rank_str, "--rank", (char*)NULL)) {
     // Default: act on rank 0.  Will give the user an error if they
@@ -90,11 +100,13 @@ int JournalTool::main(std::vector<const char*> &argv)
     rank_str = "0";
   }
 
+  dout(10) << "JournalTool::main rank_str=" << rank_str << dendl;
   r = role_selector.parse(*fsmap, rank_str);
   if (r != 0) {
     return r;
   }
 
+  dout(10) << "JournalTool::main " << dendl;
   std::string mode;
   if (arg == argv.end()) {
     derr << "Missing mode [journal|header|event]" << dendl;
@@ -303,7 +315,12 @@ int JournalTool::main_event(std::vector<const char*> &argv)
   std::vector<const char*>::iterator arg = argv.begin();
 
   std::string command = *(arg++);
-  if (command != "get" && command != "apply" && command != "splice" && command != "recover_dentries") {
+  if (command != "get" &&
+      command != "apply" &&
+      command != "splice" &&
+      command != "recover_dentries" &&
+      command != "create" &&
+      command != "load") {
     derr << "Unknown argument '" << command << "'" << dendl;
     usage();
     return -EINVAL;
@@ -342,6 +359,18 @@ int JournalTool::main_event(std::vector<const char*> &argv)
     std::string arg_str;
     if (ceph_argparse_witharg(argv, arg, &arg_str, "--path", (char*)NULL)) {
       output_path = arg_str;
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--nfiles", (char*)NULL)) {
+      nfiles = stoi(arg_str);
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--start_ino", (char*)NULL)) {
+      start_ino = std::strtoull(arg_str.c_str(),NULL,0);
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--persist", (char*)NULL)) {
+      persist = (arg_str.compare("true") == 0) ? true : false;
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--memapply", (char*)NULL)) {
+      memapply = (arg_str.compare("true") == 0) ? true : false;
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--file", (char*)NULL)) {
+      file = arg_str;
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--decoupled_dir", (char*)NULL)) {
+      decoupled_dir = arg_str;
     } else {
       derr << "Unknown argument: '" << *arg << "'" << dendl;
       usage();
@@ -457,13 +486,182 @@ int JournalTool::main_event(std::vector<const char*> &argv)
         }
       }
     }
+  } else if (command == "create") {
+    EUpdate *decoupled_eu;       // event containing decoupled directory mkdir
+    inodeno_t decoupled_ino = 0; // inode and dirfrag of decoupled directory
+    uint64_t max = 0;            // where to start appending to the journal
+    dout(10) << "Writing out some bogus files" << dendl;
 
+    // poach the dirlumps from the snapshot AND find the end of the journal
+    r = js.scan();
+    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      if (i->first > max)
+        max = i->first;
+      // TODO: we need to prune dirlumps that we don't care about (e.g., if there hierarchy > 2)
+      // TODO: if there are multiple mkdirs
+      if (i->second.log_event->get_type() == EVENT_UPDATE) {
+        EUpdate *eu = reinterpret_cast<EUpdate*>(i->second.log_event);
+        dout(0) << "found update type=" << eu->type << " while searching for decoupled_dir=" << decoupled_dir << dendl;
+        if (eu->type == "mkdir") {
+          // get the inode for the decoupled dir (this gives us the parent df)
+          map<dirfrag_t, EMetaBlob::dirlump> lumps = eu->metablob.get_lump_map();
+          for(map<dirfrag_t, EMetaBlob::dirlump>::iterator k = lumps.begin();
+              k != lumps.end();
+              k++) {
+            std::string format = "json-pretty";
+            Formatter *f = Formatter::create(format);
+            k->second.dump(f);
+            bufferlist out;
+            f->flush(out);
+            dout(10) << "checking df=" << k->first << " dirlump=" << out.to_str() << dendl;
+            list<ceph::shared_ptr<EMetaBlob::fullbit> > dfull = k->second.get_dfull(); 
+            for(list<ceph::shared_ptr<EMetaBlob::fullbit> >::iterator j = dfull.begin();
+                j != dfull.end();
+                j++) {
+              // TODO: we only support two level trees -- need to match all path components
+              dout(10) << "  fullbit->dn=" << (*j)->dn << dendl;
+              if ((*j)->dn == decoupled_dir) {
+                decoupled_ino = (*j)->inode.ino;
+                decoupled_eu  = reinterpret_cast<EUpdate*>(i->second.log_event);
+                dout(4) << "found decoupled directory dirlump at ino=" << decoupled_ino << dendl;
+              }
+            }
+          }
+	  // TODO: this might inefficient with a lot of direntries and it
+	  // assumes the metablob has everything (e.g., all dfs)
+        }
+      }
+    }
 
+    if (!decoupled_eu || decoupled_ino == 0) {
+      derr << "ERROR: couldn't find decoupled dir=" << decoupled_dir
+           << "... maybe a corrupt log import?" << dendl;
+      return -ENOENT;
+    }
+
+    dout(10) << "append opens to pos=" << std::hex << max << std::dec<< dendl;
+    for (int i = 0; i < nfiles; i++) {
+      EUpdate *le = new EUpdate(NULL, "openc");
+      uint64_t ino = start_ino + i;
+      string fname = "bogusfile" + to_string(i) + "-ino-" + to_string(ino) + ".txt";
+
+      // TODO: fix these ugly log event sizes
+      le->metablob.append_open(fname, ino, decoupled_ino, decoupled_eu->metablob.get_lump_map());
+      js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(le, 892);
+
+      std::string format = "json-pretty";
+      Formatter *f = Formatter::create(format);
+      le->dump(f);
+      bufferlist out;
+      f->flush(out);
+      dout(20) << "appending log event dump=" << out.to_str() << dendl;
+    }
+  } else if (command == "load") {
+    r = js.scan();
+    if (r) {
+      derr << "Failed to scan journal (" << cpp_strerror(r) << ")" << dendl;
+      return r;
+    }
+
+    // find the last event in the map
+    uint64_t read_offset = 0;
+    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      if (i->first > read_offset)
+        read_offset = i->first;
+    }
+    dout(4) << "Found initial read_offset=" << std::hex << read_offset << std::dec<< dendl;
+
+    // read events from a file
+    bufferlist events_bl;
+    string error;
+    int r = events_bl.read_file(file.c_str(), &error);
+    if (r < 0)
+      return r;
+  
+    // iterate over those events
+    JournalStream journal_stream(JOURNAL_FORMAT_RESILIENT);
+    bool readable = false;
+    while(true) {
+      try {
+        uint64_t need;
+        readable = journal_stream.readable(events_bl, &need);
+      } catch (buffer::error &e) {
+        dout(4) << "Giving up because invalid container encoding error: " << e << dendl;
+        return -EINVAL;
+      }
+  
+      if (!readable) {
+        // out of data, continue to next object
+        break;
+      }
+  
+      // unserialize and decode the event
+      bufferlist le_bl;
+      uint64_t start_ptr = 0;
+      uint64_t consumed = 0;
+      try {
+        consumed = journal_stream.read(events_bl, &le_bl, &start_ptr);
+      } catch(buffer::error &e) {
+        dout(4) << "Couldn't read for some reason... giving up: " << e << dendl;
+        break;
+      }
+      LogEvent *le = LogEvent::decode(le_bl);
+      if (le) {
+        dout(4) << "Dencoded success type=" << le->get_type_str() << dendl;
+        js.events[read_offset] = JournalScanner::EventRecord(le, consumed); 
+        read_offset += consumed;
+     } else {
+        dout(4) << "Invalid entry" << dendl;
+      }
+    }
   } else {
     derr << "Unknown argument '" << command << "'" << dendl;
     usage();
     return -EINVAL;
   }
+
+
+  // apply to metadata store from memory
+  if (memapply) {
+    dout(0) << "write into metadata store in RADOS" << dendl;
+    bool dry_run = false;
+    for (JournalScanner::EventMap::iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      LogEvent *le = i->second.log_event;
+      EMetaBlob const *mb = le->get_metablob();
+      if (mb) {
+        replay_offline(*mb, dry_run);
+      }
+
+      if (le->get_type() == EVENT_UPDATE) {
+        std::string format = "json-pretty";
+        Formatter *f = Formatter::create(format);
+        bufferlist out;
+        le->dump(f);
+        f->flush(out);
+        dout(10) << "dumping...\n" << out.to_str() << dendl;
+      }
+    }
+  }
+
+  // persist event list to a file
+  if (persist) {
+    bufferlist events_bl;
+    dout(0) << "write to local disk" << dendl;
+    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      // encode the event
+      bufferlist le_bl;
+      LogEvent *le = i->second.log_event;
+      le->encode_with_header(le_bl, CEPH_FEATURES_SUPPORTED_DEFAULT);
+
+      // serialize the encoded event into a bufferlist
+      JournalStream journal_stream(JOURNAL_FORMAT_RESILIENT);
+      journal_stream.write(le_bl, &events_bl, (uint64_t const) 0);
+    }
+
+      // write all the events to disk (without a header)
+      events_bl.write_file(file.c_str());
+    }
+
 
   // Generate output
   // ===============

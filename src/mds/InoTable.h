@@ -27,6 +27,8 @@ class InoTable : public MDSTable {
 
  public:
   explicit InoTable(MDSRank *m) : MDSTable(m, "inotable", true) { }
+  inodeno_t next() {return free.range_start(); };
+  inodeno_t next_projected() {return projected_free.range_start(); };
 
   inodeno_t project_alloc_id(inodeno_t id=0);
   void apply_alloc_id(inodeno_t id);

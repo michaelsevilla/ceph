@@ -1742,6 +1742,30 @@ bool MDSRankDispatcher::handle_asok_command(
       return true;
     }
     command_export_dir(f, path, (mds_rank_t)rank);
+  } else if (command == "merge") {
+    string events;
+    if(!cmd_getval(g_ceph_context, cmdmap, "events", events)) {
+      ss << "malformed events";
+      return true;
+    }
+    command_merge(f, events);
+  } else if (command == "decouple") {
+    string path;
+    if(!cmd_getval(g_ceph_context, cmdmap, "path", path)) {
+      ss << "malformed events";
+      return true;
+    }
+    int64_t decoupled;
+    if(!cmd_getval(g_ceph_context, cmdmap, "decoupled", decoupled)) {
+      ss << "malformed decoupled";
+      return true;
+    }
+    int64_t inodes;
+    if(!cmd_getval(g_ceph_context, cmdmap, "inodes", inodes)) {
+      ss << "malformed inodes";
+      return true;
+    }
+    command_decouple(f, path, decoupled, inodes);
   } else if (command == "dump cache") {
     Mutex::Locker l(mds_lock);
     string path;
@@ -2090,6 +2114,31 @@ void MDSRank::command_export_dir(Formatter *f,
   f->close_section(); // results
 }
 
+void MDSRank::command_merge(Formatter *f,
+    const std::string &events)
+{
+  int r = _command_merge(events);
+  inotable->force_replay_version(2);
+  f->open_object_section("results");
+  f->dump_int("return_code", r);
+  f->close_section(); // results
+}
+
+void MDSRank::command_decouple(Formatter *f,
+    const std::string &path,
+    int decoupled,
+    int inodes)
+{
+  interval_set<inodeno_t> ids;
+  inotable->project_alloc_ids(ids, inodes);
+  int r = _command_decouple(path, decoupled);
+  f->open_object_section("results");
+  f->dump_int("return_code", r);
+  f->dump_int("start", ids.range_start());
+  f->dump_int("end", ids.range_end());
+  f->close_section(); // results
+}
+
 int MDSRank::_command_export_dir(
     const std::string &path,
     mds_rank_t target)
@@ -2114,6 +2163,32 @@ int MDSRank::_command_export_dir(
   }
 
   mdcache->migrator->export_dir(dir, target);
+  return 0;
+}
+
+int MDSRank::_command_merge(
+    const std::string &events)
+{
+  int r = mdlog->merge(events);
+  return r;
+}
+
+int MDSRank::_command_decouple(
+    const std::string &path,
+    int decoupled)
+{
+
+  Mutex::Locker l(mds_lock);
+  filepath fp(path.c_str());
+
+  CInode *in = mdcache->cache_traverse(fp);
+  if (!in) {
+    derr << "Bath path '" << path << "'" << dendl;
+    return -ENOENT;
+  }
+  derr << "-- is_decoupled=" << in->is_decoupled() << " setting to " << decoupled << dendl;
+  in->set_decoupled(decoupled);
+  derr << "-- is_decoupled=" << in->is_decoupled() << dendl;
   return 0;
 }
 

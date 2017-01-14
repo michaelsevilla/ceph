@@ -322,6 +322,11 @@ private:
   void encode(bufferlist& bl, uint64_t features) const;
   void decode(bufferlist::iterator& bl);
   void get_inodes(std::set<inodeno_t> &inodes) const;
+  void base();
+  void append_lump(map<dirfrag_t, dirlump> lm);
+  void mkdir();
+  void append_open(string fname, inodeno_t newino, inodeno_t parentino, map<dirfrag_t, dirlump> lm);
+  map<dirfrag_t, dirlump> get_lump_map() { return lump_map; }
   void get_paths(std::vector<std::string> &paths) const;
   void get_dentries(std::map<dirfrag_t, std::set<std::string> > &dentries) const;
   entity_name_t get_client_name() const {return client_name;}

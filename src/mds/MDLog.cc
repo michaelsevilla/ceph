@@ -851,7 +851,100 @@ void MDLog::_expired(LogSegment *ls)
   logger->set(l_mdl_segexd, expired_segments.size());
 }
 
+// should this be in another thread?
+int MDLog::merge(string events)
+{
+  dout(4) << "merging updates from file events=" << events << " into the mdcache." << dendl;
 
+  // read events from a file (this should really be streamed into memory)
+  bufferlist events_bl;
+  string error;
+  int r = events_bl.read_file(events.c_str(), &error);
+  if (r < 0) {
+    derr << "could not read updates from file events=" << events << ": " << r << dendl;
+    return r;
+  }
+
+  // construct the events in memory
+  int ncreates = 0;
+  JournalStream journal_stream(JOURNAL_FORMAT_RESILIENT);
+  bool readable = false;
+  while (true) {
+    try {
+      uint64_t need;
+      readable = journal_stream.readable(events_bl, &need);
+    } catch (buffer::error &e) {
+      dout(4) << "Giving up because invalid container encoding error: " << e << dendl;
+      return -EINVAL;
+    }
+
+    if (!readable) {
+      // out of data, continue to next object
+      break;
+    }
+
+    // unserialize and decode the event
+    bufferlist bl;
+    uint64_t start_ptr = 0;
+    try {
+      journal_stream.read(events_bl, &bl, &start_ptr);
+    } catch(buffer::error &e) {
+      dout(4) << "Couldn't read for some reason... giving up: " << e << dendl;
+      break;
+    }
+    LogEvent *le = LogEvent::decode(bl);
+    if (!le) {
+      dout(4) << "Invalid entry" << dendl;
+      continue;
+    }
+
+    // copied from replay()
+    uint64_t pos = journaler->get_read_pos();
+    le->set_start_off(pos);
+
+    // new segment?
+    if (le->get_type() == EVENT_SUBTREEMAP ||
+	le->get_type() == EVENT_RESETJOURNAL) {
+      ESubtreeMap *sle = dynamic_cast<ESubtreeMap*>(le);
+      if (sle && sle->event_seq > 0)
+	event_seq = sle->event_seq;
+      else
+	event_seq = pos;
+      segments[event_seq] = new LogSegment(event_seq, pos);
+      logger->set(l_mdl_seg, segments.size());
+    } else {
+      event_seq++;
+      ncreates++;
+    }
+
+    // have we seen an import map yet?
+    if (segments.empty()) {
+      dout(10) << "_replay " << pos << "~" << bl.length() << " / " << journaler->get_write_pos()
+	       << " " << le->get_stamp() << " -- waiting for subtree_map.  (skipping " << *le << ")" << dendl;
+    } else {
+      dout(10) << "_replay " << pos << "~" << bl.length() << " / " << journaler->get_write_pos()
+	       << " " << le->get_stamp() << ": " << *le << dendl;
+      le->_segment = get_current_segment();    // replay may need this
+      le->_segment->num_events++;
+      le->_segment->end = journaler->get_read_pos();
+      num_events++;
+
+      {
+        Mutex::Locker l(mds->mds_lock);
+        if (mds->is_daemon_stopping()) {
+          return -EBUSY;
+        }
+        logger->inc(l_mdl_replayed);
+        le->replay(mds);
+      }
+    }
+    delete le;
+
+    logger->set(l_mdl_rdpos, pos);
+  }
+
+  return ncreates;
+}
 
 void MDLog::replay(MDSInternalContextBase *c)
 {
