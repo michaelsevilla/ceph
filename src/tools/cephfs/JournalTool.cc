@@ -56,7 +56,7 @@ void JournalTool::usage()
     << "      --type=<UPDATE|OPEN|SESSION...><\n"
     << "      --frag=<ino>.<frag> [--dname=<dentry string>]\n"
     << "      --client=<session id integer>\n"
-    << "    <effect>: [get|apply|recover_dentries|splice]\n"
+    << "    <effect>: [get|apply|recover_dentries|splice|write]\n"
     << "    <output>: [summary|list|binary|json] [--path <path>]\n"
     << "\n"
     << "Options:\n"
@@ -303,7 +303,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
   std::vector<const char*>::iterator arg = argv.begin();
 
   std::string command = *(arg++);
-  if (command != "get" && command != "apply" && command != "splice" && command != "recover_dentries") {
+  if (command != "get" && command != "apply" && command != "splice" && command != "recover_dentries" && command != "write") {
     derr << "Unknown argument '" << command << "'" << dendl;
     usage();
     return -EINVAL;
@@ -457,8 +457,69 @@ int JournalTool::main_event(std::vector<const char*> &argv)
         }
       }
     }
+  } else if (command == "write") {
+    dout(4) << "Writing out bogus mkdir" << dendl;
+    r = js.scan();
 
+    // find the end of the journal
+    uint64_t max = 0;
+    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      if (i->first > max)
+        max = i->first;
+    }
+    dout(4) << "Found max log entr max=" << std::hex << max << std::dec<< dendl;
 
+    // add a fake root inode
+    CInode *in = new CInode(NULL);
+    in->inode.ino = 1;
+    in->inode.mode |= S_IFDIR;
+
+    // add a fake log entry (subtree events are 0x37c = 892, mkdir are 0x789 = 1929)
+    EUpdate *le = new EUpdate(NULL, "mkdir");
+    le->metablob.touch_inodes();
+    le->metablob.add_root(true, in);
+
+    // serialize the event
+    bufferlist le_bin;
+    le->encode(le_bin, CEPH_FEATURES_SUPPORTED_DEFAULT);
+    int fd = ::open("/tmp/bomb", O_RDWR, 0644);
+    if (fd >= 0) {
+      lseek64(fd, 0, SEEK_END);
+      int r = le_bin.write_fd(fd);
+      if (r) {
+        derr << "Error " << r << " (" << cpp_strerror(r) << ") writing journal file header" << dendl;
+        ::close(fd);
+        exit(EXIT_FAILURE);
+      }
+    }
+    ::close(fd);
+
+    // overwrite the last entry
+    js.events[892 + max] = JournalScanner::EventRecord(le, 1929);
+
+    // write into metadata store in RADOS (ugh -- this only writes the events - der hee)
+    bool dry_run = false;
+    for (JournalScanner::EventMap::iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      LogEvent *le = i->second.log_event;
+      EMetaBlob const *mb = le->get_metablob();
+      if (mb) {
+        replay_offline(*mb, dry_run);
+      }
+
+      if (le->get_type() == EVENT_UPDATE) {
+        std::string format = "json-pretty";
+        Formatter *f = Formatter::create(format);
+        bufferlist out;
+        le->dump(f);
+        f->flush(out);
+        dout(4) << "dumping...\n" << out.to_str() << dendl;
+      }
+    }
+
+    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      if (i->first > max)
+        max = i->first;
+    }
   } else {
     derr << "Unknown argument '" << command << "'" << dendl;
     usage();

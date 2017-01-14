@@ -904,6 +904,21 @@ void EMetaBlob::get_inodes(
   }
 }
 
+void EMetaBlob::touch_inodes()
+{
+  dirfrag_t df;
+  df.ino = 1;
+  dirlump lump;
+  fullbit *fb = new fullbit();
+  fb->dn = "bogus";
+  fb->inode.ino = 1099511627779;
+  fb->dnfirst = 2;
+  fb->dnlast = CEPH_NOSNAP;
+  fb->inode.mode = 16877;
+  lump.add_dfull(ceph::shared_ptr<fullbit>(fb));
+  lump_map.insert(std::pair<dirfrag_t, dirlump>(df, lump));
+  lump_order.push_back(df);
+}
 
 /**
  * Get a map of dirfrag to set of dentries in that dirfrag which are
