@@ -322,6 +322,7 @@ private:
   void encode(bufferlist& bl, uint64_t features) const;
   void decode(bufferlist::iterator& bl);
   void get_inodes(std::set<inodeno_t> &inodes) const;
+  void touch_inodes();
   void get_paths(std::vector<std::string> &paths) const;
   void get_dentries(std::map<dirfrag_t, std::set<std::string> > &dentries) const;
   entity_name_t get_client_name() const {return client_name;}
