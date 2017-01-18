@@ -79,9 +79,11 @@ class JournalTool : public MDSUtility
     int consume_inos(const std::set<inodeno_t> &inos);
 
   public:
+    int nfiles;
+    bool persist;
     void usage();
     JournalTool() :
-      rank(0), other_pool(false) {}
+      rank(0), nfiles(100), persist(false), other_pool(false) {}
     int main(std::vector<const char*> &argv);
 };
 
