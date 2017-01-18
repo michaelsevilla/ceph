@@ -23,6 +23,7 @@
 
 #include "mds/events/ENoOp.h"
 #include "mds/events/EUpdate.h"
+#include "mds/events/EOpen.h"
 
 #include "JournalScanner.h"
 #include "EventOutput.h"
@@ -56,6 +57,8 @@ void JournalTool::usage()
     << "      --type=<UPDATE|OPEN|SESSION...><\n"
     << "      --frag=<ino>.<frag> [--dname=<dentry string>]\n"
     << "      --client=<session id integer>\n"
+    << "      --nfiles=<number of files>\n"
+    << "      --persist=<true|false>\n"
     << "    <effect>: [get|apply|recover_dentries|splice|write]\n"
     << "    <output>: [summary|list|binary|json] [--path <path>]\n"
     << "\n"
@@ -81,8 +84,10 @@ int JournalTool::main(std::vector<const char*> &argv)
     return -EINVAL;
   }
 
+  dout(10) << "JournalTool::main " << dendl;
   std::vector<const char*>::iterator arg = argv.begin();
 
+  dout(10) << "JournalTool::main " << dendl;
   std::string rank_str;
   if(!ceph_argparse_witharg(argv, arg, &rank_str, "--rank", (char*)NULL)) {
     // Default: act on rank 0.  Will give the user an error if they
@@ -90,11 +95,13 @@ int JournalTool::main(std::vector<const char*> &argv)
     rank_str = "0";
   }
 
+  dout(10) << "JournalTool::main rank_str=" << rank_str << dendl;
   r = role_selector.parse(*fsmap, rank_str);
   if (r != 0) {
     return r;
   }
 
+  dout(10) << "JournalTool::main " << dendl;
   std::string mode;
   if (arg == argv.end()) {
     derr << "Missing mode [journal|header|event]" << dendl;
@@ -342,6 +349,10 @@ int JournalTool::main_event(std::vector<const char*> &argv)
     std::string arg_str;
     if (ceph_argparse_witharg(argv, arg, &arg_str, "--path", (char*)NULL)) {
       output_path = arg_str;
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--nfiles", (char*)NULL)) {
+      nfiles = stoi(arg_str);
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--persist", (char*)NULL)) {
+      persist = (arg_str.compare("true") == 0) ? true : false;
     } else {
       derr << "Unknown argument: '" << *arg << "'" << dendl;
       usage();
@@ -472,53 +483,59 @@ int JournalTool::main_event(std::vector<const char*> &argv)
     // add a fake root inode
     CInode *in = new CInode(NULL);
     in->inode.ino = 1;
-    in->inode.mode |= S_IFDIR;
+    //in->inode.mode |= S_IFDIR;
+    in->inode.mode = 16877;
+    in->inode.nlink = 1;
+    in->inode.dir_layout.dl_dir_hash = 2;
+    in->inode.layout.stripe_unit = 4194304;
+    in->inode.layout.stripe_count = 1;
+    in->inode.layout.object_size = 4194304;
+    in->inode.layout.pool_id = 1;
+    in->inode.change_attr = 1;
+    in->inode.version = 2;
+    in->inode.file_data_version = 0;
+    in->inode.xattr_version = 1;
+    in->inode.backtrace_version = 2;
 
-    // add a fake log entry (subtree events are 0x37c = 892, mkdir are 0x789 = 1929)
+    dout(0) << "add a fake log entry (subtree events are 0x37c = 892, mkdir are 0x789 = 1929)" << dendl;
     EUpdate *le = new EUpdate(NULL, "mkdir");
-    le->metablob.touch_inodes();
+    le->metablob.mkdir();
     le->metablob.add_root(true, in);
+    js.events[892 + max] = JournalScanner::EventRecord(le, 892);
 
-    // serialize the event
-    bufferlist le_bin;
-    le->encode(le_bin, CEPH_FEATURES_SUPPORTED_DEFAULT);
-    int fd = ::open("/tmp/bomb", O_RDWR, 0644);
-    if (fd >= 0) {
-      lseek64(fd, 0, SEEK_END);
-      int r = le_bin.write_fd(fd);
-      if (r) {
-        derr << "Error " << r << " (" << cpp_strerror(r) << ") writing journal file header" << dendl;
-        ::close(fd);
-        exit(EXIT_FAILURE);
-      }
-    }
-    ::close(fd);
+    dout(0) << "add a fake directory open log entry" << dendl;
+    EOpen *led = new EOpen(NULL);
+    led->metablob.mkdir();
+    led->metablob.add_root(true, in);
+    js.events[892 + 892 + max] = JournalScanner::EventRecord(led, 892);
 
-    // overwrite the last entry
-    js.events[892 + max] = JournalScanner::EventRecord(le, 1929);
-
-    // write into metadata store in RADOS (ugh -- this only writes the events - der hee)
-    bool dry_run = false;
-    for (JournalScanner::EventMap::iterator i = js.events.begin(); i != js.events.end(); ++i) {
-      LogEvent *le = i->second.log_event;
-      EMetaBlob const *mb = le->get_metablob();
-      if (mb) {
-        replay_offline(*mb, dry_run);
-      }
-
-      if (le->get_type() == EVENT_UPDATE) {
-        std::string format = "json-pretty";
-        Formatter *f = Formatter::create(format);
-        bufferlist out;
-        le->dump(f);
-        f->flush(out);
-        dout(4) << "dumping...\n" << out.to_str() << dendl;
-      }
+    dout(0) << "create fake file open or create log entries" << dendl;
+    for (int i = 0; i < nfiles; i++) {
+      EUpdate *lef = new EUpdate(NULL, "openc");
+      lef->metablob.openc("bogusfile" + to_string(i) + ".txt", 1099511627780 + i);
+      lef->metablob.add_root(true, in);
+      js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(lef, 892);
     }
 
-    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
-      if (i->first > max)
-        max = i->first;
+    if (persist) {
+      dout(0) << "write into metadata store in RADOS" << dendl;
+      bool dry_run = false;
+      for (JournalScanner::EventMap::iterator i = js.events.begin(); i != js.events.end(); ++i) {
+        LogEvent *le = i->second.log_event;
+        EMetaBlob const *mb = le->get_metablob();
+        if (mb) {
+          replay_offline(*mb, dry_run);
+        }
+
+        if (le->get_type() == EVENT_UPDATE) {
+          std::string format = "json-pretty";
+          Formatter *f = Formatter::create(format);
+          bufferlist out;
+          le->dump(f);
+          f->flush(out);
+          dout(10) << "dumping...\n" << out.to_str() << dendl;
+        }
+      }
     }
   } else {
     derr << "Unknown argument '" << command << "'" << dendl;
