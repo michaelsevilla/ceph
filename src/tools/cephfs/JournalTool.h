@@ -78,9 +78,11 @@ class JournalTool : public MDSUtility
   public:
     int nfiles;
     bool persist;
+    bool memapply;
+    string file;
     void usage();
     JournalTool() :
-      rank(0), nfiles(100), persist(false) {}
+      rank(0), nfiles(100), persist(false), memapply(false), file("/tmp/blah.bin") {}
     int main(std::vector<const char*> &argv);
 };
 

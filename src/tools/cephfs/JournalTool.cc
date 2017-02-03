@@ -59,7 +59,9 @@ void JournalTool::usage()
     << "      --client=<session id integer>\n"
     << "      --nfiles=<number of files>\n"
     << "      --persist=<true|false>\n"
-    << "    <effect>: [get|apply|recover_dentries|splice|write]\n"
+    << "      --memapply=<true|false>\n"
+    << "      --file=<serialized binary file>\n"
+    << "    <effect>: [get|apply|recover_dentries|splice|create|load]\n"
     << "    <output>: [summary|list|binary|json] [--path <path>]\n"
     << "\n"
     << "Options:\n"
@@ -310,7 +312,12 @@ int JournalTool::main_event(std::vector<const char*> &argv)
   std::vector<const char*>::iterator arg = argv.begin();
 
   std::string command = *(arg++);
-  if (command != "get" && command != "apply" && command != "splice" && command != "recover_dentries" && command != "write") {
+  if (command != "get" &&
+      command != "apply" &&
+      command != "splice" &&
+      command != "recover_dentries" &&
+      command != "create" &&
+      command != "load") {
     derr << "Unknown argument '" << command << "'" << dendl;
     usage();
     return -EINVAL;
@@ -353,6 +360,10 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       nfiles = stoi(arg_str);
     } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--persist", (char*)NULL)) {
       persist = (arg_str.compare("true") == 0) ? true : false;
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--memapply", (char*)NULL)) {
+      memapply = (arg_str.compare("true") == 0) ? true : false;
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--file", (char*)NULL)) {
+      file = arg_str;
     } else {
       derr << "Unknown argument: '" << *arg << "'" << dendl;
       usage();
@@ -468,7 +479,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
         }
       }
     }
-  } else if (command == "write") {
+  } else if (command == "create") {
     dout(4) << "Writing out bogus mkdir" << dendl;
     r = js.scan();
 
@@ -516,25 +527,62 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       lef->metablob.add_root(true, in);
       js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(lef, 892);
     }
+  } else if (command == "load") {
+    r = js.scan();
+    if (r) {
+      derr << "Failed to scan journal (" << cpp_strerror(r) << ")" << dendl;
+      return r;
+    }
 
-    if (persist) {
-      dout(0) << "write into metadata store in RADOS" << dendl;
-      bool dry_run = false;
-      for (JournalScanner::EventMap::iterator i = js.events.begin(); i != js.events.end(); ++i) {
-        LogEvent *le = i->second.log_event;
-        EMetaBlob const *mb = le->get_metablob();
-        if (mb) {
-          replay_offline(*mb, dry_run);
-        }
+    // find the last event in the map
+    uint64_t read_offset = 0;
+    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      if (i->first > read_offset)
+        read_offset = i->first;
+    }
+    dout(4) << "Found initial read_offset=" << std::hex << read_offset << std::dec<< dendl;
 
-        if (le->get_type() == EVENT_UPDATE) {
-          std::string format = "json-pretty";
-          Formatter *f = Formatter::create(format);
-          bufferlist out;
-          le->dump(f);
-          f->flush(out);
-          dout(10) << "dumping...\n" << out.to_str() << dendl;
-        }
+    // read events from a file
+    bufferlist events_bl;
+    string error;
+    int r = events_bl.read_file(file.c_str(), &error);
+    if (r < 0)
+      return r;
+  
+    // iterate over those events
+    JournalStream journal_stream(JOURNAL_FORMAT_RESILIENT);
+    bool readable = false;
+    while(true) {
+      try {
+        uint64_t need;
+        readable = journal_stream.readable(events_bl, &need);
+      } catch (buffer::error &e) {
+        dout(4) << "Giving up because invalid container encoding error: " << e << dendl;
+        return -EINVAL;
+      }
+  
+      if (!readable) {
+        // out of data, continue to next object
+        break;
+      }
+  
+      // unserialize and decode the event
+      bufferlist le_bl;
+      uint64_t start_ptr = 0;
+      uint64_t consumed = 0;
+      try {
+        consumed = journal_stream.read(events_bl, &le_bl, &start_ptr);
+      } catch(buffer::error &e) {
+        dout(4) << "Couldn't read for some reason... giving up: " << e << dendl;
+        break;
+      }
+      LogEvent *le = LogEvent::decode(le_bl);
+      if (le) {
+        dout(4) << "Dencoded success type=" << le->get_type_str() << dendl;
+        js.events[read_offset] = JournalScanner::EventRecord(le, consumed); 
+        read_offset += consumed;
+     } else {
+        dout(4) << "Invalid entry" << dendl;
       }
     }
   } else {
@@ -542,6 +590,49 @@ int JournalTool::main_event(std::vector<const char*> &argv)
     usage();
     return -EINVAL;
   }
+
+
+  // apply to metadata store from memory
+  if (memapply) {
+    dout(0) << "write into metadata store in RADOS" << dendl;
+    bool dry_run = false;
+    for (JournalScanner::EventMap::iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      LogEvent *le = i->second.log_event;
+      EMetaBlob const *mb = le->get_metablob();
+      if (mb) {
+        replay_offline(*mb, dry_run);
+      }
+
+      if (le->get_type() == EVENT_UPDATE) {
+        std::string format = "json-pretty";
+        Formatter *f = Formatter::create(format);
+        bufferlist out;
+        le->dump(f);
+        f->flush(out);
+        dout(10) << "dumping...\n" << out.to_str() << dendl;
+      }
+    }
+  }
+
+  // persist event list to a file
+  if (persist) {
+    bufferlist events_bl;
+    dout(0) << "write to local disk" << dendl;
+    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      // encode the event
+      bufferlist le_bl;
+      LogEvent *le = i->second.log_event;
+      le->encode_with_header(le_bl, CEPH_FEATURES_SUPPORTED_DEFAULT);
+
+      // serialize the encoded event into a bufferlist
+      JournalStream journal_stream(JOURNAL_FORMAT_RESILIENT);
+      journal_stream.write(le_bl, &events_bl, (uint64_t const) 0);
+    }
+
+      // write all the events to disk (without a header)
+      events_bl.write_file(file.c_str());
+    }
+
 
   // Generate output
   // ===============
