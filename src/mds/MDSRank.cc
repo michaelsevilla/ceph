@@ -1742,6 +1742,13 @@ bool MDSRankDispatcher::handle_asok_command(
       return true;
     }
     command_export_dir(f, path, (mds_rank_t)rank);
+  } else if (command == "merge") {
+    string events;
+    if(!cmd_getval(g_ceph_context, cmdmap, "events", events)) {
+      ss << "malformed events";
+      return true;
+    }
+    command_merge(f, events);
   } else if (command == "dump cache") {
     Mutex::Locker l(mds_lock);
     string path;
@@ -2090,6 +2097,15 @@ void MDSRank::command_export_dir(Formatter *f,
   f->close_section(); // results
 }
 
+void MDSRank::command_merge(Formatter *f,
+    const std::string &events)
+{
+  int r = _command_merge(events);
+  f->open_object_section("results");
+  f->dump_int("return_code", r);
+  f->close_section(); // results
+}
+
 int MDSRank::_command_export_dir(
     const std::string &path,
     mds_rank_t target)
@@ -2115,6 +2131,13 @@ int MDSRank::_command_export_dir(
 
   mdcache->migrator->export_dir(dir, target);
   return 0;
+}
+
+int MDSRank::_command_merge(
+    const std::string &events)
+{
+  int r = mdlog->merge(events);
+  return r;
 }
 
 CDir *MDSRank::_command_dirfrag_get(

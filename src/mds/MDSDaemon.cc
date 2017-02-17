@@ -269,6 +269,12 @@ void MDSDaemon::set_up_admin_socket()
                                      asok_hook,
                                      "migrate a subtree to named MDS");
   assert(r == 0);
+  r = admin_socket->register_command("merge",
+                                     "merge "
+                                     "name=events,type=CephString ",
+                                     asok_hook,
+                                     "merge updates streamed into the MDS");
+  assert(r == 0);
   r = admin_socket->register_command("dump cache",
                                      "dump cache name=path,type=CephString,req=false",
                                      asok_hook,
@@ -346,6 +352,7 @@ void MDSDaemon::clean_up_admin_socket()
   admin_socket->unregister_command("tag path");
   admin_socket->unregister_command("flush_path");
   admin_socket->unregister_command("export dir");
+  admin_socket->unregister_command("merge");
   admin_socket->unregister_command("dump cache");
   admin_socket->unregister_command("dump tree");
   admin_socket->unregister_command("session evict");
