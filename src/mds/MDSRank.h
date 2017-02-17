@@ -419,6 +419,7 @@ class MDSRank {
     void command_get_subtrees(Formatter *f);
     void command_export_dir(Formatter *f,
         const std::string &path, mds_rank_t dest);
+    void command_merge(Formatter *f, const std::string &path);
     bool command_dirfrag_split(
         cmdmap_t cmdmap,
         std::ostream &ss);
@@ -430,6 +431,7 @@ class MDSRank {
         std::ostream &ss,
         Formatter *f);
     int _command_export_dir(const std::string &path, mds_rank_t dest);
+    int _command_merge(const std::string &events);
     int _command_flush_journal(std::stringstream *ss);
     CDir *_command_dirfrag_get(
         const cmdmap_t &cmdmap,
