@@ -2348,14 +2348,14 @@ CInode* Server::prepare_new_inode(MDRequestRef& mdr, CDir *dir, inodeno_t useino
       in->inode.ino = mdr->session->take_ino(useino);  // prealloc -> used
     mds->sessionmap.mark_projected(mdr->session);
 
-    dout(10) << "prepare_new_inode used_prealloc " << mdr->used_prealloc_ino
+    dout(0) << "prepare_new_inode used_prealloc " << mdr->used_prealloc_ino
 	     << " (" << mdr->session->info.prealloc_inos
 	     << ", " << mdr->session->info.prealloc_inos.size() << " left)"
 	     << dendl;
   } else {
     mdr->alloc_ino = 
       in->inode.ino = mds->inotable->project_alloc_id();
-    dout(10) << "prepare_new_inode alloc " << mdr->alloc_ino << dendl;
+    dout(0) << "prepare_new_inode alloc " << mdr->alloc_ino << dendl;
   }
 
   if (useino && useino != in->inode.ino) {
