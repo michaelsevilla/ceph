@@ -854,6 +854,7 @@ int MDLog::merge(string events)
   }
 
   // construct the events in memory
+  int ncreates = 0;
   JournalStream journal_stream(JOURNAL_FORMAT_RESILIENT);
   bool readable = false;
   while (true) {
@@ -901,6 +902,7 @@ int MDLog::merge(string events)
       logger->set(l_mdl_seg, segments.size());
     } else {
       event_seq++;
+      ncreates++;
     }
 
     // have we seen an import map yet?
@@ -928,7 +930,8 @@ int MDLog::merge(string events)
 
     logger->set(l_mdl_rdpos, pos);
   }
-  return 0;
+
+  return ncreates;
 }
 
 void MDLog::replay(MDSInternalContextBase *c)

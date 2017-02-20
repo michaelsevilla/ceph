@@ -525,6 +525,7 @@ OPTION(mds_session_blacklist_on_timeout, OPT_BOOL, true)    // whether to blackl
 OPTION(mds_session_blacklist_on_evict, OPT_BOOL, true)  // whether to blacklist clients whose sessions are dropped via admin commands
 
 OPTION(mds_sessionmap_keys_per_op, OPT_U32, 1024)    // how many sessions should I try to load/store in a single OMAP operation?
+OPTION(mds_rpcs, OPT_BOOL, true)                           // should I do round trips or decoupled?
 OPTION(mds_revoke_cap_timeout, OPT_FLOAT, 60)    // detect clients which aren't revoking caps
 OPTION(mds_recall_state_timeout, OPT_FLOAT, 60)    // detect clients which aren't trimming caps
 OPTION(mds_freeze_tree_timeout, OPT_FLOAT, 30)    // detecting freeze tree deadlock
