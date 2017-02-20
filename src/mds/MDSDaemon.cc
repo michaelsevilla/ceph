@@ -275,6 +275,14 @@ void MDSDaemon::set_up_admin_socket()
                                      asok_hook,
                                      "merge updates streamed into the MDS");
   assert(r == 0);
+  r = admin_socket->register_command("decouple",
+                                     "decouple "
+                                     "name=path,type=CephString "
+                                     "name=decoupled,type=CephInt "
+                                     "name=inodes,type=CephInt",
+                                     asok_hook,
+                                     "decouple namespace at this path");
+  assert(r == 0);
   r = admin_socket->register_command("dump cache",
                                      "dump cache name=path,type=CephString,req=false",
                                      asok_hook,
@@ -353,6 +361,7 @@ void MDSDaemon::clean_up_admin_socket()
   admin_socket->unregister_command("flush_path");
   admin_socket->unregister_command("export dir");
   admin_socket->unregister_command("merge");
+  admin_socket->unregister_command("decouple");
   admin_socket->unregister_command("dump cache");
   admin_socket->unregister_command("dump tree");
   admin_socket->unregister_command("session evict");

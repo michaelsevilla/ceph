@@ -904,99 +904,51 @@ void EMetaBlob::get_inodes(
   }
 }
 
-void EMetaBlob::base()
+void EMetaBlob::append_open(string fname, inodeno_t newino, inodeno_t parentino, map<dirfrag_t, dirlump> lm)
 {
-  // set global variables for this operation
-  sessionmapv = 2;
-  inotablev = 2;
+  for(map<dirfrag_t, dirlump>::iterator i = lm.begin();
+      i != lm.end();
+      i++) {
+    if (parentino == i->first.ino) {
 
-  // add bogus directory to root (/)
-  dirfrag_t df;
-  df.ino = 1;
-  dirlump lump;
-  lump.nfull = 1;
-  lump.fnode.version = 3;
-  lump.state |= EMetaBlob::dirlump::STATE_DIRTY;
+      // copy dirfrag and dirlump from decoupled directory
+      // TODO: shouldn't have to copy lump values here
+      dirlump lump;
+      lump.fnode.version = 1;
+    
+      // add all information about the bogus file
+      used_preallocated_ino = newino;
+      fullbit *fb = new fullbit();
+      fb->dn = fname;
+      fb->inode.ino = newino;
+      fb->dnfirst = 2;
+      fb->dnlast = CEPH_NOSNAP;
+      fb->inode.mode = 33188;
+      fb->inode.dir_layout.dl_dir_hash = 0;
+      fb->dnv = 2;
+      fb->inode.version = 2;
+      fb->inode.file_data_version = 0;
+      fb->inode.xattr_version = 1;
+      fb->inode.backtrace_version = 2;
+      fb->inode.nlink= 1;
+      fb->inode.layout.stripe_unit = 4194304;
+      fb->inode.layout.stripe_count = 1;
+      fb->inode.layout.object_size = 4194304;
+      fb->inode.layout.pool_id = 1;
+      fb->state |= EMetaBlob::fullbit::STATE_DIRTY;
+      fb->state |= EMetaBlob::fullbit::STATE_DIRTYPARENT;
+      fb->state |= EMetaBlob::fullbit::STATE_DIRTYPOOL;
 
-  // add all information about the bogus directory
-  fullbit *fb = new fullbit();
-  fb->dn = "bogus";
-  fb->inode.ino = 1099511627779;
-  fb->dnfirst = 2;
-  fb->dnlast = CEPH_NOSNAP;
-  fb->inode.mode = 16877;
-  fb->inode.dir_layout.dl_dir_hash = 2;
-  fb->dnv = 2;
-  fb->inode.version = 2;
-  fb->inode.file_data_version = 0;
-  fb->inode.xattr_version = 1;
-  fb->inode.backtrace_version = 2;
-  fb->inode.nlink= 1;
-  fb->state |= EMetaBlob::fullbit::STATE_DIRTY;
-  fb->state |= EMetaBlob::fullbit::STATE_DIRTYPARENT;
-
-  // add to the lump maps
-  lump.add_dfull(ceph::shared_ptr<fullbit>(fb));
-  lump_map.insert(std::pair<dirfrag_t, dirlump>(df, lump));
-  lump_order.push_back(df);
-}
-
-void EMetaBlob::mkdir()
-{
-  // set values for this operation
-  base();
-  allocated_ino = 1099511627779;
-
-  // add bogus directory entry
-  dirfrag_t df;
-  df.ino = 1099511627779;
-  dirlump lump;
-  lump.fnode.version = 1;
-  lump.state |= EMetaBlob::dirlump::STATE_COMPLETE;
-  lump.state |= EMetaBlob::dirlump::STATE_DIRTY;
-  lump.state |= EMetaBlob::dirlump::STATE_NEW;
-  lump_map.insert(std::pair<dirfrag_t, dirlump>(df, lump));
-  lump_order.push_back(df);
-}
-
-void EMetaBlob::openc(string fname, inodeno_t newino)
-{
-  // set values for this operation
-  base();
-  used_preallocated_ino = newino;
-
-  // add bogus file to bogus directory entry
-  dirfrag_t df;
-  df.ino = 1099511627779;
-  dirlump lump;
-  lump.fnode.version = 1;
-
-  // add all information about the bogus file
-  fullbit *fb = new fullbit();
-  fb->dn = fname;
-  fb->inode.ino = newino;
-  fb->dnfirst = 2;
-  fb->dnlast = CEPH_NOSNAP;
-  fb->inode.mode = 33188;
-  fb->inode.dir_layout.dl_dir_hash = 0;
-  fb->dnv = 2;
-  fb->inode.version = 2;
-  fb->inode.file_data_version = 0;
-  fb->inode.xattr_version = 1;
-  fb->inode.backtrace_version = 2;
-  fb->inode.nlink= 1;
-  fb->inode.layout.stripe_unit = 4194304;
-  fb->inode.layout.stripe_count = 1;
-  fb->inode.layout.object_size = 4194304;
-  fb->inode.layout.pool_id = 1;
-  fb->state |= EMetaBlob::fullbit::STATE_DIRTY;
-  fb->state |= EMetaBlob::fullbit::STATE_DIRTYPARENT;
-  fb->state |= EMetaBlob::fullbit::STATE_DIRTYPOOL;
-
-  // add to the lump maps
-  lump.add_dfull(ceph::shared_ptr<fullbit>(fb));
-  lump_map.insert(std::pair<dirfrag_t, dirlump>(df, lump));
-  lump_order.push_back(df);
+      // add to the lump maps
+      lump.add_dfull(ceph::shared_ptr<fullbit>(fb));
+      lump_map.insert(std::pair<dirfrag_t, dirlump>(i->first, lump));
+      lump_order.push_back(i->first);
+    } else {
+      // add to the lump maps
+      lump_map.insert(std::pair<dirfrag_t, dirlump>(i->first, i->second));
+      lump_order.push_back(i->first);
+    }
+  }
 }
 
 /**

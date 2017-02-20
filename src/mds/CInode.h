@@ -86,6 +86,8 @@ public:
   bool is_file() const    { return inode.is_file(); }
   bool is_symlink() const { return inode.is_symlink(); }
   bool is_dir() const     { return inode.is_dir(); }
+  client_t is_decoupled() const     { return inode.is_decoupled(); }
+  void set_decoupled(int val) { return inode.set_decoupled(val); }
   static object_t get_object_name(inodeno_t ino, frag_t fg, const char *suffix);
 
   /* Full serialization for use in ".inode" root inode objects */

@@ -906,6 +906,19 @@ int Session::check_access(CInode *in, unsigned mask,
 			    new_uid, new_gid)) {
     return -EACCES;
   }
+
+  client_t client = get_client();
+  client_t decoupled = in->is_decoupled();
+  if (in->ino() != 1 &&      // not the root inode
+      decoupled != 0 &&      // path is decoupled
+      decoupled != client) { // path is not checked out to the client
+    dout(0) << " path=" << path 
+            << " is decoupled=" << decoupled 
+            << " but client=" << client 
+            << " is unauthorized" << dendl;
+    return -EBUSY;
+  }
+
   return 0;
 }
 

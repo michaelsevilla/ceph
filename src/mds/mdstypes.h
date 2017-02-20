@@ -526,6 +526,7 @@ struct inode_t {
   version_t last_scrub_version;// (parent) start version of last complete scrub
 
   version_t backtrace_version;
+  client_t decoupled;    // [dir only]
 
   snapid_t oldest_snap;
 
@@ -538,7 +539,7 @@ struct inode_t {
 	      truncate_pending(0),
 	      time_warp_seq(0), change_attr(0),
 	      version(0), file_data_version(0), xattr_version(0),
-	      last_scrub_version(0), backtrace_version(0) {
+	      last_scrub_version(0), backtrace_version(0), decoupled(false) {
     clear_layout();
     memset(&dir_layout, 0, sizeof(dir_layout));
     memset(&quota, 0, sizeof(quota));
@@ -547,6 +548,8 @@ struct inode_t {
   // file type
   bool is_symlink() const { return (mode & S_IFMT) == S_IFLNK; }
   bool is_dir()     const { return (mode & S_IFMT) == S_IFDIR; }
+  client_t is_decoupled() const { return decoupled; }
+  void set_decoupled(int val) { decoupled = (client_t) val;}
   bool is_file()    const { return (mode & S_IFMT) == S_IFREG; }
 
   bool is_truncating() const { return (truncate_pending > 0); }
