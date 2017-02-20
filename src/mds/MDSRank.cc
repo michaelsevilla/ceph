@@ -2101,6 +2101,7 @@ void MDSRank::command_merge(Formatter *f,
     const std::string &events)
 {
   int r = _command_merge(events);
+  inotable->skip_inos(r);
   f->open_object_section("results");
   f->dump_int("return_code", r);
   f->close_section(); // results
