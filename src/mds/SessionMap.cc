@@ -906,6 +906,12 @@ int Session::check_access(CInode *in, unsigned mask,
 			    new_uid, new_gid)) {
     return -EACCES;
   }
+
+  if (in->is_decoupled()) {
+    dout(0) << " path=" << path << " is decoupled... someone must check it back in!" << dendl;
+    return -EBUSY;
+  }
+
   return 0;
 }
 

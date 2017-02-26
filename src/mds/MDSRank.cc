@@ -1749,6 +1749,18 @@ bool MDSRankDispatcher::handle_asok_command(
       return true;
     }
     command_merge(f, events);
+  } else if (command == "decouple") {
+    string path;
+    if(!cmd_getval(g_ceph_context, cmdmap, "path", path)) {
+      ss << "malformed events";
+      return true;
+    }
+    int64_t decoupled;
+    if(!cmd_getval(g_ceph_context, cmdmap, "decoupled", decoupled)) {
+      ss << "malformed decoupled";
+      return true;
+    }
+    command_decouple(f, path, decoupled);
   } else if (command == "dump cache") {
     Mutex::Locker l(mds_lock);
     string path;
@@ -2107,6 +2119,16 @@ void MDSRank::command_merge(Formatter *f,
   f->close_section(); // results
 }
 
+void MDSRank::command_decouple(Formatter *f,
+    const std::string &path,
+    bool decoupled)
+{
+  int r = _command_decouple(path, decoupled);
+  f->open_object_section("results");
+  f->dump_int("return_code", r);
+  f->close_section(); // results
+}
+
 int MDSRank::_command_export_dir(
     const std::string &path,
     mds_rank_t target)
@@ -2139,6 +2161,24 @@ int MDSRank::_command_merge(
 {
   int r = mdlog->merge(events);
   return r;
+}
+
+int MDSRank::_command_decouple(
+    const std::string &path,
+    bool decoupled)
+{
+
+  Mutex::Locker l(mds_lock);
+  filepath fp(path.c_str());
+
+  CInode *in = mdcache->cache_traverse(fp);
+  if (!in) {
+    derr << "Bath path '" << path << "'" << dendl;
+    return -ENOENT;
+  }
+
+  in->set_decoupled(decoupled);
+  return 0;
 }
 
 CDir *MDSRank::_command_dirfrag_get(
