@@ -941,6 +941,18 @@ void EMetaBlob::base()
   lump_order.push_back(df);
 }
 
+void EMetaBlob::append_lump(map<dirfrag_t, dirlump> lm)
+{
+  for(map<dirfrag_t, dirlump>::iterator i = lm.begin();
+      i != lm.end();
+      i++) {
+    // add to the lump maps
+    //lump.add_dfull(ceph::shared_ptr<fullbit>());
+    lump_map.insert(std::pair<dirfrag_t, dirlump>(i->first, i->second));
+    lump_order.push_back(i->first);
+  }
+}
+
 void EMetaBlob::mkdir()
 {
   // set values for this operation
@@ -959,7 +971,7 @@ void EMetaBlob::mkdir()
   lump_order.push_back(df);
 }
 
-void EMetaBlob::openc(string fname, inodeno_t newino)
+void EMetaBlob::openc(string fname, inodeno_t newino)//, fb *dir)
 {
   // set values for this operation
   base();

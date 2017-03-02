@@ -278,7 +278,8 @@ void MDSDaemon::set_up_admin_socket()
   r = admin_socket->register_command("decouple",
                                      "decouple "
                                      "name=path,type=CephString "
-                                     "name=decoupled,type=CephInt",
+                                     "name=decoupled,type=CephInt "
+                                     "name=inodes,type=CephInt",
                                      asok_hook,
                                      "decouple namespace at this path");
   assert(r == 0);

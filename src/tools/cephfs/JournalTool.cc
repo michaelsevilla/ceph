@@ -24,6 +24,7 @@
 #include "mds/events/ENoOp.h"
 #include "mds/events/EUpdate.h"
 #include "mds/events/EOpen.h"
+#include "mds/events/EMetaBlob.h"
 
 #include "JournalScanner.h"
 #include "EventOutput.h"
@@ -61,6 +62,8 @@ void JournalTool::usage()
     << "      --persist=<true|false>\n"
     << "      --memapply=<true|false>\n"
     << "      --file=<serialized binary file>\n"
+    << "      --start_ino=<which inode to start counting from>\n"
+    << "      --decoupled_dir=<directory that was decoupled>\n"
     << "    <effect>: [get|apply|recover_dentries|splice|create|load]\n"
     << "    <output>: [summary|list|binary|json] [--path <path>]\n"
     << "\n"
@@ -358,12 +361,16 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       output_path = arg_str;
     } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--nfiles", (char*)NULL)) {
       nfiles = stoi(arg_str);
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--start_ino", (char*)NULL)) {
+      start_ino = std::strtoull(arg_str.c_str(),NULL,0);
     } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--persist", (char*)NULL)) {
       persist = (arg_str.compare("true") == 0) ? true : false;
     } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--memapply", (char*)NULL)) {
       memapply = (arg_str.compare("true") == 0) ? true : false;
     } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--file", (char*)NULL)) {
       file = arg_str;
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--decoupled_dir", (char*)NULL)) {
+      decoupled_dir = arg_str;
     } else {
       derr << "Unknown argument: '" << *arg << "'" << dendl;
       usage();
@@ -514,18 +521,89 @@ int JournalTool::main_event(std::vector<const char*> &argv)
     le->metablob.add_root(true, in);
     js.events[892 + max] = JournalScanner::EventRecord(le, 892);
 
-    dout(0) << "add a fake directory open log entry" << dendl;
-    EOpen *led = new EOpen(NULL);
-    led->metablob.mkdir();
-    led->metablob.add_root(true, in);
-    js.events[892 + 892 + max] = JournalScanner::EventRecord(led, 892);
+    //dout(0) << "add a fake directory open log entry" << dendl;
+    //EOpen *led = new EOpen(NULL);
+    //led->metablob.mkdir();
+    //led->metablob.add_root(true, in);
+    //js.events[892 + 892 + max] = JournalScanner::EventRecord(led, 892);
+
+    // Eh -- the directory might not be in the journal -- which would be bad
+    // Also, this would require reconstructing the cache which we don't want to do
+    //dout(0) << "poach the directory fullbit from the event list" << dendl;
+    //string path = "bogus";
+    //for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+    //  std::vector<std::string> ev_paths;
+    //  EMetaBlob const *emb = i->second.log_event->get_metablob();
+    //  if (emb) {
+    //    emb->get_paths(ev_paths);
+    //  }
+    //  dout(0) << "ev_paths=" << ev_paths << dendl;
+    //}
+
+    dout(0) << "cherry-pick the decoupled fullbit" << dendl;
+    EUpdate *eu;
+    for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+      // TODO: we need to prune dirlumps that we don't care about (e.g., if there hierarchy > 2)
+      // TODO: if there are multiple mkdirs
+      if (i->second.log_event->get_type() == EVENT_UPDATE) {
+        eu = reinterpret_cast<EUpdate*>(i->second.log_event);
+        dout(0) << "found update type=" << eu->type << dendl;
+        if (eu->type == "mkdir") {
+          map<dirfrag_t, EMetaBlob::dirlump> lumps = eu->metablob.get_lump_map();
+          for(map<dirfrag_t, EMetaBlob::dirlump>::iterator i = lumps.begin();
+              i != lumps.end();
+              i++) {
+            list<ceph::shared_ptr<EMetaBlob::fullbit> > dfull = i->second.get_dfull(); 
+            for(list<ceph::shared_ptr<EMetaBlob::fullbit> >::iterator j = dfull.begin();
+                j != dfull.end();
+                j++) {
+              // TODO: we only support two level trees -- need to match all path components
+              dout(10) << "  fullbit->dn=" << (*j)->dn << dendl;
+              if ((*j)->dn == decoupled_dir) {
+                dout(0) << "found decoupled directory dirlump at ino=" << (*j)->inode.ino << dendl;
+                break;
+              }
+            }
+          }
+        }
+        //eu->metablob.dump(f);
+        //EMetaBlob emb = eu->metablob;
+        //f->flush(out);
+        //dout(10) << "dumping...\n" << out.to_str() << dendl;
+//
+//        EUpdate *lef = new EUpdate(NULL, "openc");
+//        //uint64_t ino = start_ino; //+i;
+//        string fname = "bogusfile";// + to_string(i) + "-ino-" + to_string(ino) + ".txt";
+//        //lef->metablob.openc(fname, ino);
+//        //lef->metablob.add_root(true, in);
+//        //js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(lef, 892);
+//        //map<dirfrag_t, EMetaBlob::dirlump> penis = eu->metablob.get_lump_map();
+//        //std::string format = "json-pretty";
+//        //Formatter *f = Formatter::create(format);
+//        //lef->metablob.append_lump(penis);
+//        lef->metablob.append_lump(eu->metablob.get_lump_map());
+//        //lef->metablob.dump(f);
+//        //bufferlist out;
+//        //f->flush(out);
+//        //dout(10) << "dumping...\n" << out.to_str() << dendl;
+      }
+    }
+
+    if (!eu)
+      return -ENOENT;
 
     dout(0) << "create fake file open or create log entries" << dendl;
     for (int i = 0; i < nfiles; i++) {
       EUpdate *lef = new EUpdate(NULL, "openc");
-      lef->metablob.openc("bogusfile" + to_string(i) + ".txt", 1099511627780 + i);
-      lef->metablob.add_root(true, in);
+      uint64_t ino = start_ino + i;
+      string fname = "bogusfile" + to_string(i) + "-ino-" + to_string(ino) + ".txt";
+
+      lef->metablob.openc(fname, ino);
+      //lef->metablob.add_root(true, in);
+      lef->metablob.append_lump(eu->metablob.get_lump_map());
       js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(lef, 892);
+
+      //return 0;
     }
   } else if (command == "load") {
     r = js.scan();

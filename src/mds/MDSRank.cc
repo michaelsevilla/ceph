@@ -1760,7 +1760,12 @@ bool MDSRankDispatcher::handle_asok_command(
       ss << "malformed decoupled";
       return true;
     }
-    command_decouple(f, path, decoupled);
+    int64_t inodes;
+    if(!cmd_getval(g_ceph_context, cmdmap, "inodes", inodes)) {
+      ss << "malformed inodes";
+      return true;
+    }
+    command_decouple(f, path, decoupled, inodes);
   } else if (command == "dump cache") {
     Mutex::Locker l(mds_lock);
     string path;
@@ -2113,7 +2118,7 @@ void MDSRank::command_merge(Formatter *f,
     const std::string &events)
 {
   int r = _command_merge(events);
-  inotable->skip_inos(r);
+  inotable->force_replay_version(2);
   f->open_object_section("results");
   f->dump_int("return_code", r);
   f->close_section(); // results
@@ -2121,11 +2126,16 @@ void MDSRank::command_merge(Formatter *f,
 
 void MDSRank::command_decouple(Formatter *f,
     const std::string &path,
-    bool decoupled)
+    bool decoupled,
+    int inodes)
 {
+  interval_set<inodeno_t> ids;
+  inotable->project_alloc_ids(ids, inodes);
   int r = _command_decouple(path, decoupled);
   f->open_object_section("results");
   f->dump_int("return_code", r);
+  f->dump_int("start", ids.range_start());
+  f->dump_int("end", ids.range_end());
   f->close_section(); // results
 }
 
@@ -2176,8 +2186,6 @@ int MDSRank::_command_decouple(
     derr << "Bath path '" << path << "'" << dendl;
     return -ENOENT;
   }
-
-  in->set_decoupled(decoupled);
   return 0;
 }
 

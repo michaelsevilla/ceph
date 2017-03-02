@@ -379,7 +379,7 @@ class MDSRank {
     void command_export_dir(Formatter *f,
         const std::string &path, mds_rank_t dest);
     void command_merge(Formatter *f, const std::string &path);
-    void command_decouple(Formatter *f, const std::string &path, bool decoupled);
+    void command_decouple(Formatter *f, const std::string &path, bool decoupled, int inodes);
     bool command_dirfrag_split(
         cmdmap_t cmdmap,
         std::ostream &ss);

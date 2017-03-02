@@ -70,7 +70,7 @@ void InoTable::project_alloc_ids(interval_set<inodeno_t>& ids, int want)
     ids.insert(start, num);
     want -= num;
   }
-  dout(10) << "project_alloc_ids " << ids << " to " << projected_free << "/" << free << dendl;
+  dout(0) << "project_alloc_ids " << ids << " to " << projected_free << "/" << free << dendl;
   ++projected_version;
 }
 void InoTable::apply_alloc_ids(interval_set<inodeno_t>& ids)
