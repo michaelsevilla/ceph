@@ -971,15 +971,15 @@ void EMetaBlob::mkdir()
   lump_order.push_back(df);
 }
 
-void EMetaBlob::openc(string fname, inodeno_t newino)//, fb *dir)
+void EMetaBlob::openc(string fname, inodeno_t newino, dirfrag_t df)//, fb *dir)
 {
   // set values for this operation
-  base();
+//  base();
   used_preallocated_ino = newino;
 
   // add bogus file to bogus directory entry
-  dirfrag_t df;
-  df.ino = 1099511627779;
+//  dirfrag_t df;
+//  df.ino = 1099511627779;
   dirlump lump;
   lump.fnode.version = 1;
 

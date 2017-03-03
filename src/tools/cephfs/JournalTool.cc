@@ -498,28 +498,28 @@ int JournalTool::main_event(std::vector<const char*> &argv)
     }
     dout(4) << "Found max log entr max=" << std::hex << max << std::dec<< dendl;
 
-    // add a fake root inode
-    CInode *in = new CInode(NULL);
-    in->inode.ino = 1;
-    //in->inode.mode |= S_IFDIR;
-    in->inode.mode = 16877;
-    in->inode.nlink = 1;
-    in->inode.dir_layout.dl_dir_hash = 2;
-    in->inode.layout.stripe_unit = 4194304;
-    in->inode.layout.stripe_count = 1;
-    in->inode.layout.object_size = 4194304;
-    in->inode.layout.pool_id = 1;
-    in->inode.change_attr = 1;
-    in->inode.version = 2;
-    in->inode.file_data_version = 0;
-    in->inode.xattr_version = 1;
-    in->inode.backtrace_version = 2;
-
-    dout(0) << "add a fake log entry (subtree events are 0x37c = 892, mkdir are 0x789 = 1929)" << dendl;
-    EUpdate *le = new EUpdate(NULL, "mkdir");
-    le->metablob.mkdir();
-    le->metablob.add_root(true, in);
-    js.events[892 + max] = JournalScanner::EventRecord(le, 892);
+//    // add a fake root inode
+//    CInode *in = new CInode(NULL);
+//    in->inode.ino = 1;
+//    //in->inode.mode |= S_IFDIR;
+//    in->inode.mode = 16877;
+//    in->inode.nlink = 1;
+//    in->inode.dir_layout.dl_dir_hash = 2;
+//    in->inode.layout.stripe_unit = 4194304;
+//    in->inode.layout.stripe_count = 1;
+//    in->inode.layout.object_size = 4194304;
+//    in->inode.layout.pool_id = 1;
+//    in->inode.change_attr = 1;
+//    in->inode.version = 2;
+//    in->inode.file_data_version = 0;
+//    in->inode.xattr_version = 1;
+//    in->inode.backtrace_version = 2;
+//
+//    dout(0) << "add a fake log entry (subtree events are 0x37c = 892, mkdir are 0x789 = 1929)" << dendl;
+//    EUpdate *le = new EUpdate(NULL, "mkdir");
+//    le->metablob.mkdir();
+//    le->metablob.add_root(true, in);
+//    js.events[892 + max] = JournalScanner::EventRecord(le, 892);
 
     //dout(0) << "add a fake directory open log entry" << dendl;
     //EOpen *led = new EOpen(NULL);
@@ -542,13 +542,15 @@ int JournalTool::main_event(std::vector<const char*> &argv)
 
     dout(0) << "cherry-pick the decoupled fullbit" << dendl;
     EUpdate *eu;
+    dirfrag_t df;
     for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
       // TODO: we need to prune dirlumps that we don't care about (e.g., if there hierarchy > 2)
       // TODO: if there are multiple mkdirs
       if (i->second.log_event->get_type() == EVENT_UPDATE) {
         eu = reinterpret_cast<EUpdate*>(i->second.log_event);
-        dout(0) << "found update type=" << eu->type << dendl;
+        dout(0) << "found update type=" << eu->type << " while searching for decoupled_dir=" << decoupled_dir << dendl;
         if (eu->type == "mkdir") {
+          dout(0) << "iterating over dirlumps#=" << eu->metablob.get_lump_map().size() << dendl;
           map<dirfrag_t, EMetaBlob::dirlump> lumps = eu->metablob.get_lump_map();
           for(map<dirfrag_t, EMetaBlob::dirlump>::iterator i = lumps.begin();
               i != lumps.end();
@@ -561,7 +563,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
               dout(10) << "  fullbit->dn=" << (*j)->dn << dendl;
               if ((*j)->dn == decoupled_dir) {
                 dout(0) << "found decoupled directory dirlump at ino=" << (*j)->inode.ino << dendl;
-                break;
+                df = i->first;
               }
             }
           }
@@ -598,12 +600,19 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       uint64_t ino = start_ino + i;
       string fname = "bogusfile" + to_string(i) + "-ino-" + to_string(ino) + ".txt";
 
-      lef->metablob.openc(fname, ino);
+      lef->metablob.openc(fname, ino, df);
       //lef->metablob.add_root(true, in);
       lef->metablob.append_lump(eu->metablob.get_lump_map());
       js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(lef, 892);
 
-      //return 0;
+      std::string format = "json-pretty";
+      Formatter *f = Formatter::create(format);
+      lef->metablob.dump(f);
+      bufferlist out;
+      f->flush(out);
+      dout(10) << "dumping...\n" << out.to_str() << dendl;
+
+      return 0;
     }
   } else if (command == "load") {
     r = js.scan();

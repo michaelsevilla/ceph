@@ -325,7 +325,7 @@ private:
   void base();
   void append_lump(map<dirfrag_t, dirlump> lm);
   void mkdir();
-  void openc(string fname, inodeno_t newino);
+  void openc(string fname, inodeno_t newino, dirfrag_t df);
   map<dirfrag_t, dirlump> get_lump_map() { return lump_map; }
   void get_paths(std::vector<std::string> &paths) const;
   void get_dentries(std::map<dirfrag_t, std::set<std::string> > &dentries) const;
