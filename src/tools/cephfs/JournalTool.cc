@@ -555,6 +555,16 @@ int JournalTool::main_event(std::vector<const char*> &argv)
           for(map<dirfrag_t, EMetaBlob::dirlump>::iterator i = lumps.begin();
               i != lumps.end();
               i++) {
+             dout(0) << "checking df=" << i->first << dendl;
+            // dump each dirlump
+            std::string format = "json-pretty";
+            Formatter *f = Formatter::create(format);
+            //lef->metablob.dump(f);
+            i->second.dump(f);
+            bufferlist out;
+            f->flush(out);
+            dout(10) << "dumping...\n" << out.to_str() << dendl;
+
             list<ceph::shared_ptr<EMetaBlob::fullbit> > dfull = i->second.get_dfull(); 
             for(list<ceph::shared_ptr<EMetaBlob::fullbit> >::iterator j = dfull.begin();
                 j != dfull.end();
@@ -563,6 +573,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
               dout(10) << "  fullbit->dn=" << (*j)->dn << dendl;
               if ((*j)->dn == decoupled_dir) {
                 dout(0) << "found decoupled directory dirlump at ino=" << (*j)->inode.ino << dendl;
+                dout(0) << "selecting df=" << i->first << dendl;
                 df = i->first;
               }
             }
@@ -600,14 +611,15 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       uint64_t ino = start_ino + i;
       string fname = "bogusfile" + to_string(i) + "-ino-" + to_string(ino) + ".txt";
 
-      lef->metablob.openc(fname, ino, df);
       //lef->metablob.add_root(true, in);
       lef->metablob.append_lump(eu->metablob.get_lump_map());
+      lef->metablob.openc(fname, ino, df);
       js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(lef, 892);
 
+      dout(0) << "passing to openc df=" << df << dendl;
       std::string format = "json-pretty";
       Formatter *f = Formatter::create(format);
-      lef->metablob.dump(f);
+      //lef->metablob.dump(f);
       bufferlist out;
       f->flush(out);
       dout(10) << "dumping...\n" << out.to_str() << dendl;
