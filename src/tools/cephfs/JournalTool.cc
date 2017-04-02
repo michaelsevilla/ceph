@@ -487,7 +487,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       }
     }
   } else if (command == "create") {
-    EUpdate *eu;                 // event we will steal the 
+    EUpdate *decoupled_eu;       // event containing decoupled directory mkdir
     inodeno_t decoupled_ino = 0; // inode and dirfrag of decoupled directory
     uint64_t max = 0;            // where to start appending to the journal
     dout(10) << "Writing out some bogus files" << dendl;
@@ -500,21 +500,21 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       // TODO: we need to prune dirlumps that we don't care about (e.g., if there hierarchy > 2)
       // TODO: if there are multiple mkdirs
       if (i->second.log_event->get_type() == EVENT_UPDATE) {
-        eu = reinterpret_cast<EUpdate*>(i->second.log_event);
+        EUpdate *eu = reinterpret_cast<EUpdate*>(i->second.log_event);
         dout(0) << "found update type=" << eu->type << " while searching for decoupled_dir=" << decoupled_dir << dendl;
         if (eu->type == "mkdir") {
           // get the inode for the decoupled dir (this gives us the parent df)
           map<dirfrag_t, EMetaBlob::dirlump> lumps = eu->metablob.get_lump_map();
-          for(map<dirfrag_t, EMetaBlob::dirlump>::iterator i = lumps.begin();
-              i != lumps.end();
-              i++) {
+          for(map<dirfrag_t, EMetaBlob::dirlump>::iterator k = lumps.begin();
+              k != lumps.end();
+              k++) {
             std::string format = "json-pretty";
             Formatter *f = Formatter::create(format);
-            i->second.dump(f);
+            k->second.dump(f);
             bufferlist out;
             f->flush(out);
-            dout(10) << "checking df=" << i->first << " dirlump=" << out.to_str() << dendl;
-            list<ceph::shared_ptr<EMetaBlob::fullbit> > dfull = i->second.get_dfull(); 
+            dout(10) << "checking df=" << k->first << " dirlump=" << out.to_str() << dendl;
+            list<ceph::shared_ptr<EMetaBlob::fullbit> > dfull = k->second.get_dfull(); 
             for(list<ceph::shared_ptr<EMetaBlob::fullbit> >::iterator j = dfull.begin();
                 j != dfull.end();
                 j++) {
@@ -522,6 +522,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
               dout(10) << "  fullbit->dn=" << (*j)->dn << dendl;
               if ((*j)->dn == decoupled_dir) {
                 decoupled_ino = (*j)->inode.ino;
+                decoupled_eu  = reinterpret_cast<EUpdate*>(i->second.log_event);
                 dout(4) << "found decoupled directory dirlump at ino=" << decoupled_ino << dendl;
               }
             }
@@ -532,7 +533,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       }
     }
 
-    if (!eu || decoupled_ino == 0) {
+    if (!decoupled_eu || decoupled_ino == 0) {
       derr << "ERROR: couldn't find decoupled dir=" << decoupled_dir
            << "... maybe a corrupt log import?" << dendl;
       return -ENOENT;
@@ -545,7 +546,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       string fname = "bogusfile" + to_string(i) + "-ino-" + to_string(ino) + ".txt";
 
       // TODO: fix these ugly log event sizes
-      le->metablob.append_open(fname, ino, decoupled_ino, eu->metablob.get_lump_map());
+      le->metablob.append_open(fname, ino, decoupled_ino, decoupled_eu->metablob.get_lump_map());
       js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(le, 892);
 
       std::string format = "json-pretty";
@@ -553,7 +554,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       le->dump(f);
       bufferlist out;
       f->flush(out);
-      dout(10) << "appending log event dump=" << out.to_str() << dendl;
+      dout(20) << "appending log event dump=" << out.to_str() << dendl;
     }
   } else if (command == "load") {
     r = js.scan();
