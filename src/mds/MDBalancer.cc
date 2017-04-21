@@ -318,13 +318,10 @@ void MDBalancer::handle_heartbeat(MHeartbeat *m)
 
       /* avoid spamming ceph -w if user does not turn mantle on */
       if (mds->mdsmap->get_balancer() != "") {
-        int r = mantle_prep_rebalance();
-        if (!r) return;
-	mds->clog->warn() << "using old balancer; mantle failed for "
-                          << "balancer=" << mds->mdsmap->get_balancer()
-                          << " : " << cpp_strerror(r);
+        mantle_prep_rebalance();
+      } else {
+        prep_rebalance(m->get_beat());
       }
-      prep_rebalance(m->get_beat());
     }
   }
 
@@ -670,13 +667,17 @@ void MDBalancer::prep_rebalance(int beat)
 
 
 
-int MDBalancer::mantle_prep_rebalance()
+void MDBalancer::mantle_prep_rebalance()
 {
   /* refresh balancer if it has changed */
   if (bal_version != mds->mdsmap->get_balancer()) {
     bal_version.assign("");
     int r = localize_balancer();
-    if (r) return r;
+    if (r) {
+      mds->clog->warn() << "no load migrated; mds=" << mds->get_nodeid()
+                        << " cannot localize balancer : " << cpp_strerror(r);
+      return;
+    };
 
     /* only spam the cluster log from 1 mds on version changes */
     if (mds->get_nodeid() == 0)
@@ -710,16 +711,24 @@ int MDBalancer::mantle_prep_rebalance()
   /* execute the balancer */
   Mantle mantle;
   int ret = mantle.balance(bal_code, mds->get_nodeid(), metrics, my_targets);
-  dout(2) << " mantle decided that new targets=" << my_targets << dendl;
+  if (ret) {
+    mds->clog->warn() << "no load migrated; mantle failed for "
+                      << "balancer=" << mds->mdsmap->get_balancer()
+                      << " : " << cpp_strerror(ret);
+    return;
+  }
 
   /* mantle doesn't know about cluster size, so check target len here */
-  if ((int) my_targets.size() != cluster_size)
-    return -EINVAL;
-  else if (ret)
-    return ret;
+  int ntargets = (int) my_targets.size();
+  if (ntargets != cluster_size) {
+    mds->clog->warn() << "no load migrated; mantle failed for "
+                      << "balancer=" << mds->mdsmap->get_balancer()
+                      << " : " << cpp_strerror(-EINVAL);
+    return;
+  }
+  dout(2) << " mantle decided that new targets=" << my_targets << dendl;
 
   try_rebalance();
-  return 0;
 }
 
 

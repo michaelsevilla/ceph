@@ -14,6 +14,10 @@ end
 
 -- Shed load when you have load and your neighbor doesn't
 function when()
+  if mds[whoami+1] == nil then
+    BAL_LOG(2, "when: neighbor does not exist; I'm probably the last mds")
+    return false
+  end
   my_load = mds[whoami]["load"]
   his_load = mds[whoami+1]["load"]
   if my_load > 0.01 and his_load < 0.01 then

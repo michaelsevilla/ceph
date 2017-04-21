@@ -76,8 +76,8 @@ Mantle with `vstart.sh`
 
 ::
 
-    bin/ceph fs set cephfs allow_multimds true --yes-i-really-mean-it
-    bin/ceph fs set cephfs max_mds 5
+    bin/ceph fs set cephfs_a allow_multimds true --yes-i-really-mean-it
+    bin/ceph fs set cephfs_a max_mds 5
     bin/ceph fs set cephfs_a balancer greedyspill.lua
 
 
@@ -85,13 +85,14 @@ Mantle with `vstart.sh`
 
 ::
 
-     bin/ceph-fuse /cephfs -o allow_other &
-     tail -f out/mds.a.log
+    mkdir /cephfs
+    bin/ceph-fuse /cephfs -o allow_other &
+    tail -f out/mds.a.log
 
 
-   Note that if you look at the last MDS (which could be a, b, or c -- it's
-   random), you will see an an attempt to index a nil value. This is because the
-   last MDS tries to check the load of its neighbor, which does not exist.
+Note that if you look at the last MDS (which could be a, b, or c -- it's
+random), you will see an an attempt to index a nil value. This is because the
+last MDS tries to check the load of its neighbor, which does not exist.
 
 5. Run a simple benchmark. In our case, we use the Docker mdtest image to
    create load:
@@ -161,10 +162,10 @@ Implementation Details
 Most of the implementation is in MDBalancer. Metrics are passed to the balancer
 policies via the Lua stack and a list of loads is returned back to MDBalancer.
 It sits alongside the current balancer implementation and it's enabled with a
-Ceph CLI command ("ceph fs set cephfs balancer mybalancer.lua"). If the Lua policy
-fails (for whatever reason), we fall back to the original metadata load
-balancer. The balancer is stored in the RADOS metadata pool and a string in the
-MDSMap tells the MDSs which balancer to use.
+Ceph CLI command ("ceph fs set cephfs balancer mybalancer.lua"). If the Lua
+policy fails (for whatever reason), we do not migrate any load. The balancer
+is stored in the RADOS metadata pool and a string in the MDSMap tells the MDSs
+which balancer to use.
 
 Exposing Metrics to Lua
 ~~~~~~~~~~~~~~~~~~~~~~~
