@@ -1118,6 +1118,21 @@ public:
     for (int i=0; i<NUM; i++) 
       vec[i].reset(now);
   }
+  double get_ird(utime_t now, const DecayRate& rate) {
+    return vec[META_POP_IRD].get(now, rate);
+  }
+  double get_iwr(utime_t now, const DecayRate& rate) {
+    return vec[META_POP_IWR].get(now, rate);
+  }
+  double get_readdir(utime_t now, const DecayRate& rate) {
+    return vec[META_POP_READDIR].get(now, rate);
+  }
+  double get_fetch(utime_t now, const DecayRate& rate) {
+    return vec[META_POP_FETCH].get(now, rate);
+  }
+  double get_store(utime_t now, const DecayRate& rate) {
+    return vec[META_POP_STORE].get(now, rate);
+  }
   double meta_load(utime_t now, const DecayRate& rate) {
     return 
       1*vec[META_POP_IRD].get(now, rate) + 

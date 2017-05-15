@@ -11749,7 +11749,6 @@ void MDCache::dump_cache(const char *fn, Formatter *f,
 
     if (f) {
       f->open_object_section("inode");
-      in->dump(f);
     } else {
       ostringstream ss;
       ss << *in << std::endl;
@@ -11770,6 +11769,12 @@ void MDCache::dump_cache(const char *fn, Formatter *f,
       if (f) {
         f->open_object_section("dir");
         dir->dump(f);
+        utime_t now = ceph_clock_now(g_ceph_context);
+        f->dump_float("heat_ird", dir->pop_me.get_ird(now, mds->mdcache->decayrate));
+        f->dump_float("heat_iwr", dir->pop_me.get_iwr(now, mds->mdcache->decayrate));
+        f->dump_float("heat_readdir", dir->pop_me.get_readdir(now, mds->mdcache->decayrate));
+        f->dump_float("heat_fetch", dir->pop_me.get_fetch(now, mds->mdcache->decayrate));
+        f->dump_float("heat_store", dir->pop_me.get_store(now, mds->mdcache->decayrate));
       } else {
         ostringstream tt;
         tt << " " << *dir << std::endl;
@@ -11778,31 +11783,6 @@ void MDCache::dump_cache(const char *fn, Formatter *f,
         if (r < 0) {
           goto out;
         }
-      }
-      
-      if (f) {
-        f->open_array_section("dentries");
-      }
-      for (CDir::map_t::iterator q = dir->items.begin();
-	   q != dir->items.end();
-	   ++q) {
-	CDentry *dn = q->second;
-        if (f) {
-	  f->open_object_section("dentry");
-          dn->dump(f);
-          f->close_section();
-        } else {
-          ostringstream uu;
-          uu << "  " << *dn << std::endl;
-          string u = uu.str();
-          r = safe_write(fd, u.c_str(), u.length());
-          if (r < 0) {
-            goto out;
-          }
-        }
-      }
-      if (f) {
-	f->close_section();  //dentries
       }
       dir->check_rstats();
       if (f) {
