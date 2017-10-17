@@ -13,6 +13,9 @@
 
 
 #include <sstream>
+#include <unistd.h>
+#include <sys/types.h>
+#include <signal.h>
 
 #include "common/ceph_argparse.h"
 #include "common/errno.h"
@@ -539,22 +542,84 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       return -ENOENT;
     }
 
-    dout(10) << "append opens to pos=" << std::hex << max << std::dec<< dendl;
-    for (int i = 0; i < nfiles; i++) {
-      EUpdate *le = new EUpdate(NULL, "openc");
-      uint64_t ino = start_ino + i;
-      string fname = "bogusfile" + to_string(i) + "-ino-" + to_string(ino) + ".txt";
+    // setting update interval
+    double update_interval = 2;
+    // record start time and check for update intervals at the end of the for loop for every file created
+    std::clock_t start;
+    std::clock_t end;
+    start = std::clock();
+    //spawn child process for background update
+    pid_t pid = fork();
+    if(pid == 0){
+      // Child process
+      // process that makes updates to the metadata server
+      printf("\nFrom child\n");
+      std::clock_t start_time = start;
+      std::clock_t start_temp = start;
+      while(1){
+          std::clock_t time_temp = std::clock() - start_temp;
+          double time = time_temp / (double) CLOCKS_PER_SEC;
+          if (time >= update_interval){
+            system("bin/ceph daemon mds.b merge events.bin");
+            start_temp = std::clock();
+          }
+          std::clock_t from_start = std::clock() - start_time;
+          double from_start_time = from_start / (double) CLOCKS_PER_SEC;
+          if(from_start_time >= 10){
+            break;
+          }
+      }
+    } else if(pid > 0){
+      //parent process
+      printf("\nFrom parent\n");
+      dout(10) << "append opens to pos=" << std::hex << max << std::dec<< dendl;
+      for (int i = 0; i < nfiles; i++) {
+          EUpdate *le = new EUpdate(NULL, "openc");
+          uint64_t ino = start_ino + i;
+          string fname = "bogusfile" + to_string(i) + "-ino-" + to_string(ino) + ".txt";
 
-      // TODO: fix these ugly log event sizes
-      le->metablob.append_open(fname, ino, decoupled_ino, decoupled_eu->metablob.get_lump_map());
-      js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(le, 892);
+          // TODO: fix these ugly log event sizes
+          le->metablob.append_open(fname, ino, decoupled_ino, decoupled_eu->metablob.get_lump_map());
+          js.events[892 + 892 + 892 + 892*i + max] = JournalScanner::EventRecord(le, 892);
 
-      std::string format = "json-pretty";
-      Formatter *f = Formatter::create(format);
-      le->dump(f);
-      bufferlist out;
-      f->flush(out);
-      dout(20) << "appending log event dump=" << out.to_str() << dendl;
+          std::string format = "json-pretty";
+          Formatter *f = Formatter::create(format);
+          le->dump(f);
+          bufferlist out;
+          f->flush(out);
+          dout(20) << "appending log event dump=" << out.to_str() << dendl;
+
+          
+          // checking for tick exceeding interval to write partial updates
+          end = std::clock();
+          std::clock_t clockTicksTaken = end - start;
+          double time_elapsed = clockTicksTaken / (double) CLOCKS_PER_SEC;
+          if (time_elapsed >= update_interval) {
+            // write logs to memory
+            bufferlist events_b1;
+            dout(0) << "write to local disk" << dendl;
+            for (JournalScanner::EventMap::const_iterator i = js.events.begin(); i != js.events.end(); ++i) {
+                // encode event
+                bufferlist le_b1;
+                LogEvent *le = i->second.log_event;
+                le->encode_with_header(le_b1, CEPH_FEATURES_SUPPORTED_DEFAULT);
+
+                // serialize the encoded event into a bufferlist
+                JournalStream journal_stream(JOURNAL_FORMAT_RESILIENT);
+                journal_stream.write(le_b1, &events_b1, (uint64_t const) 0);
+            }
+            
+            // write all events to disk (without a header)
+            events_b1.write_file(file.c_str());
+
+            // reset start of clock to measure next interval
+            start = std::clock();
+          }
+      }
+      // kill child here
+      kill( pid , SIGKILL);
+    } else {
+      printf("Fork failed! Updates cannot be made!");
     }
   } else if (command == "load") {
     r = js.scan();
