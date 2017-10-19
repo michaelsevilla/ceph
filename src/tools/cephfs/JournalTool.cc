@@ -63,6 +63,7 @@ void JournalTool::usage()
     << "      --memapply=<true|false>\n"
     << "      --file=<serialized binary file>\n"
     << "      --start_ino=<which inode to start counting from>\n"
+    << "      --namespace_sync=<how often to sync back to global namespace>\n"
     << "      --decoupled_dir=<directory that was decoupled>\n"
     << "    <effect>: [get|apply|recover_dentries|splice|create|load]\n"
     << "    <output>: [summary|list|binary|json] [--path <path>]\n"
@@ -363,6 +364,8 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       nfiles = stoi(arg_str);
     } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--start_ino", (char*)NULL)) {
       start_ino = std::strtoull(arg_str.c_str(),NULL,0);
+    } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--namespace_sync", (char*)NULL)) {
+      namespace_sync = std::strtoull(arg_str.c_str(),NULL,0);
     } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--persist", (char*)NULL)) {
       persist = (arg_str.compare("true") == 0) ? true : false;
     } else if (ceph_argparse_witharg(argv, arg, &arg_str, "--memapply", (char*)NULL)) {
@@ -540,7 +543,6 @@ int JournalTool::main_event(std::vector<const char*> &argv)
     }
     dout(10) << "append opens to pos=" << std::hex << max << std::dec<< dendl;
 
-    double update_interval = 2;
     std::clock_t start = std::clock();
     std::clock_t end;
     int nevents = 0;
@@ -566,7 +568,7 @@ int JournalTool::main_event(std::vector<const char*> &argv)
       end = std::clock();
       std::clock_t clockTicksTaken = end - start;
       double time_elapsed = clockTicksTaken / (double) CLOCKS_PER_SEC;
-      if (time_elapsed >= update_interval) {
+      if (namespace_sync > 0 && time_elapsed >= namespace_sync) {
         pid_t pid = fork();
         if (pid > 0) { // child
           bufferlist events_b1;

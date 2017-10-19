@@ -81,12 +81,13 @@ class JournalTool : public MDSUtility
     bool memapply;
     string file;
     uint64_t start_ino;
+    uint64_t namespace_sync;
     string decoupled_dir;
     int ndumps;
     void usage();
     JournalTool() :
       rank(0), nfiles(100), persist(false), memapply(false),
-      file("/tmp/blah.bin"), start_ino(1099511627780), decoupled_dir("bogus"), ndumps(0) {}
+      file("/tmp/blah.bin"), start_ino(1099511627780), namespace_sync(0), decoupled_dir("bogus"), ndumps(0) {}
     int main(std::vector<const char*> &argv);
 };
 
