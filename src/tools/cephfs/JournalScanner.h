@@ -80,10 +80,11 @@ class JournalScanner
   inodeno_t ino;  // Corresponds to JournalPointer.front
   class EventRecord {
     public:
-    EventRecord() : log_event(NULL), raw_size(0) {}
-    EventRecord(LogEvent *le, uint32_t rs) : log_event(le), raw_size(rs) {}
+    EventRecord() : log_event(NULL), raw_size(0), version(0) {}
+    EventRecord(LogEvent *le, uint32_t rs, int v = 0) : log_event(le), raw_size(rs), version(v) {}
     LogEvent *log_event;
     uint32_t raw_size;  //< Size from start offset including all encoding overhead
+    int version;
   };
 
   class EventError {
